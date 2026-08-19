@@ -1,0 +1,133 @@
+package github
+
+import (
+	"encoding/json"
+	"fmt"
+	"regexp"
+	"strings"
+
+	"gitmake/internal/runner"
+)
+
+type Client struct{ Run runner.Runner }
+
+type defaultBranchRef struct {
+	Name string `json:"name"`
+}
+
+type RepoInfo struct {
+	NameWithOwner    string            `json:"nameWithOwner"`
+	URL              string            `json:"url"`
+	DefaultBranchRef *defaultBranchRef `json:"defaultBranchRef"`
+}
+
+func (r RepoInfo) DefaultBranch() string {
+	if r.DefaultBranchRef == nil {
+		return ""
+	}
+	return r.DefaultBranchRef.Name
+}
+
+func (c Client) Preflight() error {
+	if res, err := c.Run.Run("", "gh", "--version"); err != nil {
+		return fmt.Errorf("GitHub CLI (gh) not found: %w", err)
+	} else if res.Code != 0 {
+		return fmt.Errorf("GitHub CLI check failed: %s", message(res))
+	}
+	res, err := c.Run.Run("", "gh", "auth", "status", "--hostname", "github.com")
+	if err != nil {
+		return fmt.Errorf("gh auth status: %w", err)
+	}
+	if res.Code != 0 {
+		return fmt.Errorf("GitHub authentication is not ready; run 'gh auth login': %s", message(res))
+	}
+	return nil
+}
+
+func (c Client) CurrentUser() (string, error) {
+	res, err := c.Run.Run("", "gh", "api", "user", "--jq", ".login")
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("resolve GitHub user: %s", message(res))
+	}
+	user := strings.TrimSpace(res.Stdout)
+	if user == "" {
+		return "", fmt.Errorf("GitHub returned an empty login")
+	}
+	return user, nil
+}
+
+var notFoundRE = regexp.MustCompile(`(?i)(HTTP\s*404|repository\s+not\s+found|could\s+not\s+resolve|\bnot\s+found\b)`)
+
+func (c Client) Repo(owner, name string) (RepoInfo, bool, error) {
+	target := owner + "/" + name
+	res, err := c.Run.Run("", "gh", "repo", "view", target, "--json", "nameWithOwner,url,defaultBranchRef")
+	if err != nil {
+		return RepoInfo{}, false, err
+	}
+	if res.Code != 0 {
+		combined := res.Stdout + "\n" + res.Stderr
+		if notFoundRE.MatchString(combined) {
+			return RepoInfo{}, false, nil
+		}
+		return RepoInfo{}, false, fmt.Errorf("check repository %s: %s", target, message(res))
+	}
+	var info RepoInfo
+	if err := json.Unmarshal([]byte(res.Stdout), &info); err != nil {
+		return RepoInfo{}, false, fmt.Errorf("parse gh repo view output: %w", err)
+	}
+	return info, true, nil
+}
+
+func (c Client) Clone(target, dest string) error {
+	res, err := c.Run.Run("", "gh", "repo", "clone", target, dest)
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 {
+		return fmt.Errorf("clone %s: %s", target, message(res))
+	}
+	return nil
+}
+
+func (c Client) CreateAndPush(target, visibility, description, source string) (string, error) {
+	args := []string{"repo", "create", target, "--source", source, "--remote", "origin", "--push"}
+	switch visibility {
+	case "private":
+		args = append(args, "--private")
+	case "public":
+		args = append(args, "--public")
+	case "internal":
+		args = append(args, "--internal")
+	}
+	if description != "" {
+		args = append(args, "--description", description)
+	}
+	res, err := c.Run.Run("", "gh", args...)
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("create GitHub repository: %s", message(res))
+	}
+	url := strings.TrimSpace(res.Stdout)
+	if url == "" {
+		view, err := c.Run.Run("", "gh", "repo", "view", target, "--json", "url", "--jq", ".url")
+		if err == nil && view.Code == 0 {
+			url = strings.TrimSpace(view.Stdout)
+		}
+	}
+	return url, nil
+}
+
+func message(res runner.Result) string {
+	if res.Stderr != "" {
+		return res.Stderr
+	}
+	if res.Stdout != "" {
+		return res.Stdout
+	}
+	return fmt.Sprintf("exit code %d", res.Code)
+}

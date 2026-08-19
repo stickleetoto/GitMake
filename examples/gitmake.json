@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "repo": {
+    "name": "ContextDiet",
+    "description": "Fast file context optimizer",
+    "visibility": "private"
+  },
+  "source": {
+    "zip": "ContextDiet_v0.1.0.zip",
+    "strip_root": true
+  },
+  "git": {
+    "branch": "main",
+    "initial_commit_message": "Initial commit",
+    "commit_message": "Update ContextDiet v0.1.0"
+  }
+}

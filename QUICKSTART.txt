@@ -1,0 +1,44 @@
+GitMake v0.1.3 - Windows x64 Quick Start
+
+REQUIREMENTS
+- Git installed
+- GitHub CLI (gh) installed
+- Run once: gh auth login
+- If Git asks for commit identity:
+    git config --global user.name "Your Name"
+    git config --global user.email "you@example.com"
+
+FASTEST USE
+1. Extract this GitMake package.
+2. Put exactly one project ZIP beside gitmake.exe.
+3. Double-click gitmake.exe.
+
+Example:
+  gitmake.exe
+  ContextDiet_v0.1.0.zip
+
+GitMake will create gitmake.json automatically, select the ZIP, derive the
+repository name, check Git/GitHub, and CREATE or UPDATE the repository.
+
+IF YOU RAN IT BEFORE ADDING THE ZIP
+No problem. GitMake creates a starter gitmake.json and exits normally.
+Add one ZIP beside it and run again. v0.1.3 automatically repairs:
+  YOUR_PROJECT.zip -> actual ZIP filename
+  YOUR_REPOSITORY  -> derived repository name
+
+IF MULTIPLE ZIP FILES ARE PRESENT
+GitMake does not guess. Open gitmake.json and set:
+  "source": { "zip": "the-file-you-want.zip" }
+
+NORMAL FILES
+  gitmake.exe
+  gitmake.json
+  your-project.zip
+
+TERMINAL
+  .\gitmake.exe --dry-run
+  .\gitmake.exe --verbose
+  .\gitmake.exe
+
+Double-click mode waits for Enter before closing.
+RUN_GITMAKE.bat is included as an always-pause fallback.
