@@ -138,12 +138,12 @@ git --git-dir="$TMP/remotes/testuser/Demo.git" ls-tree -r --name-only HEAD | gre
 # C. No-change update: no empty commit.
 (cd "$A" && "$BIN" >nochange.log 2>&1)
 test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 2
-grep -q 'No changes detected' "$A/nochange.log"
+grep -q 'already up to date' "$A/nochange.log"
 
 # D. No ZIP is onboarding, not a crash/error exit.
 D="$TMP/nozip"; mkdir -p "$D"
 (cd "$D" && "$BIN" >nozip.log 2>&1)
-grep -q 'No project ZIP found yet' "$D/nozip.log"
+grep -q 'No project ZIP found in this folder' "$D/nozip.log"
 
 # E. Placeholder starter repairs itself when one ZIP is added later.
 makezip "$D/Recover_v2.0.zip" 'Recover/file.txt=ok'
@@ -177,7 +177,7 @@ git --git-dir="$TMP/remotes/testuser/Legacy.git" symbolic-ref HEAD refs/heads/ma
 printf '%s\n' '{"repo":{"name":"Legacy"},"source":{"zip":"payload.zip"},"git":{"branch":"main"}}' > "$H/gitmake.json"
 makezip "$H/payload.zip" 'root/legacy.txt=new'
 (cd "$H" && "$BIN" >legacy.log 2>&1)
-grep -q 'using repository default branch "master"' "$H/legacy.log"
+grep -q 'Branch fallback' "$H/legacy.log"
 test "$(git --git-dir="$TMP/remotes/testuser/Legacy.git" rev-list --count refs/heads/master)" = 2
 
 # I. Dry-run create does not create remote.
@@ -233,7 +233,7 @@ printf '%s\n' '{"repo":{"name":"ReleaseRepo"},"source":{"zip":"payload.zip"},"gi
 (cd "$O" && "$BIN" >release-create.log 2>&1)
 test -d "$TMP/releases/testuser/ReleaseRepo/v1.0.0"
 test -f "$TMP/releases/testuser/ReleaseRepo/v1.0.0/assets/app-win.zip"
-grep -q 'Released: v1.0.0' "$O/release-create.log"
+grep -q 'Released.*v1.0.0' "$O/release-create.log"
 
 # P. A new release can be created even when the repository snapshot has no changes.
 python - "$O/gitmake.json" <<'PY2'
@@ -244,7 +244,7 @@ count_before="$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list -
 (cd "$O" && "$BIN" >release-nochange.log 2>&1)
 test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before"
 test -d "$TMP/releases/testuser/ReleaseRepo/v1.0.1"
-grep -q 'No changes detected' "$O/release-nochange.log"
+grep -q 'already up to date' "$O/release-nochange.log"
 
 # Q. Duplicate release defaults to an early error and does not push source changes.
 makezip "$O/payload.zip" 'root/app.txt=should-not-push'
@@ -259,7 +259,7 @@ p=sys.argv[1]; d=json.load(open(p)); d['release']['on_existing']='skip'; json.du
 PY2
 (cd "$O" && "$BIN" >release-skip.log 2>&1)
 test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = $((count_before+1))
-grep -q 'already exists — skipped' "$O/release-skip.log"
+grep -q 'already exists' "$O/release-skip.log"
 
 # S. Missing release asset fails before a new source change is committed.
 python - "$O/gitmake.json" <<'PY2'
@@ -280,13 +280,13 @@ PY2
 (cd "$O" && "$BIN" --dry-run >release-dry.log 2>&1)
 test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before_missing"
 test ! -d "$TMP/releases/testuser/ReleaseRepo/v1.0.2"
-grep -q 'release v1.0.2 will NOT be created' "$O/release-dry.log"
+grep -q 'Release plan.*v1.0.2' "$O/release-dry.log"
 
 # U. --no-release updates GitHub but suppresses the configured release.
 (cd "$O" && "$BIN" --no-release >release-norelease.log 2>&1)
 test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = $((count_before_missing+1))
 test ! -d "$TMP/releases/testuser/ReleaseRepo/v1.0.2"
-grep -q 'Release skipped (--no-release)' "$O/release-norelease.log"
+grep -q 'Release.*skipped' "$O/release-norelease.log"
 
 # V. Invalid Git tag is rejected before repository mutation.
 python - "$O/gitmake.json" <<'PY2'

@@ -1,28 +1,20 @@
 {
   "schema_version": 1,
   "repo": {
-    "name": "ContextDiet",
-    "description": "Fast file context optimizer",
+    "name": "GitMake-Demo",
+    "description": "Example repository published by GitMake",
     "visibility": "private"
   },
   "source": {
-    "zip": "ContextDiet_v0.2.0_Source.zip",
+    "zip": "GitMake-Demo_v0.3.0.zip",
     "strip_root": true
   },
   "git": {
     "branch": "main",
     "initial_commit_message": "Initial commit",
-    "commit_message": "Update ContextDiet v0.2.0"
+    "commit_message": "Update GitMake-Demo"
   },
   "release": {
-    "enabled": false,
-    "tag": "v0.2.0",
-    "title": "ContextDiet v0.2.0",
-    "generate_notes": true,
-    "assets": [
-      "ContextDiet_v0.2.0_Windows_x64.zip",
-      "ContextDiet_v0.2.0_Source.zip"
-    ],
-    "on_existing": "error"
+    "enabled": false
   }
 }

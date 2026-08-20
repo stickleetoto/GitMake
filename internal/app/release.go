@@ -113,37 +113,32 @@ func resolveRegularFile(base, configured, field string) (string, error) {
 
 func finishRelease(plan releasePlan, target, branch string, dryRun bool, gh github.Client) error {
 	if !plan.enabled {
-		fmt.Printf("[8/8] %s\n", plan.disabledWhy)
+		if plan.disabledWhy == "Release skipped (--no-release)" {
+			fmt.Println("· Release               skipped")
+		}
 		return nil
 	}
 	if plan.skipExisting {
-		fmt.Printf("[8/8] Release %s already exists — skipped\n", plan.spec.Tag)
+		fmt.Printf("✓ Release               %s already exists\n", plan.spec.Tag)
 		if plan.existingURL != "" {
-			fmt.Println(plan.existingURL)
+			fmt.Println("  " + plan.existingURL)
 		}
 		return nil
 	}
 
 	plan.spec.Target = branch
 	if dryRun {
-		fmt.Printf("[8/8] Dry run — release %s will NOT be created\n", plan.spec.Tag)
-		if len(plan.spec.Assets) > 0 {
-			fmt.Println("Release assets:")
-			for _, asset := range plan.spec.Assets {
-				fmt.Println("  -", filepath.Base(asset))
-			}
-		}
+		fmt.Printf("· Release plan          %s · %d assets\n", plan.spec.Tag, len(plan.spec.Assets))
 		return nil
 	}
 
-	fmt.Printf("[8/8] Creating GitHub release %s\n", plan.spec.Tag)
 	url, err := gh.CreateRelease(target, plan.spec)
 	if err != nil {
 		return err
 	}
-	fmt.Println("✓ Released:", plan.spec.Tag)
+	fmt.Printf("✓ Released              %s · %d assets\n", plan.spec.Tag, len(plan.spec.Assets))
 	if url != "" {
-		fmt.Println(url)
+		fmt.Println("  " + url)
 	}
 	return nil
 }

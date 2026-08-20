@@ -3,6 +3,8 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -214,4 +216,37 @@ func (c Client) CreateRelease(target string, o ReleaseCreateOptions) (string, er
 		}
 	}
 	return url, nil
+}
+
+func (c Client) LatestReleaseTag(target string) (string, error) {
+	res, err := c.Run.Run("", "gh", "release", "view", "--repo", target, "--json", "tagName", "--jq", ".tagName")
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("check latest GitMake release: %s", message(res))
+	}
+	tag := strings.TrimSpace(res.Stdout)
+	if tag == "" {
+		return "", fmt.Errorf("GitHub returned an empty latest release tag")
+	}
+	return tag, nil
+}
+
+func (c Client) DownloadReleaseAsset(target, tag, asset, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	res, err := c.Run.Run("", "gh", "release", "download", tag, "--repo", target, "--pattern", asset, "--dir", dir, "--clobber")
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("download GitMake release asset: %s", message(res))
+	}
+	path := filepath.Join(dir, asset)
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("downloaded asset not found at %s", path)
+	}
+	return path, nil
 }

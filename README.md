@@ -1,257 +1,245 @@
-# GitMake v0.2.0
+# GitMake v0.3.0
 
-`project.zip + gitmake.json + gitmake.exe` -> create or update a GitHub repository, then optionally publish a GitHub Release with assets.
+GitMake turns a project ZIP into a GitHub repository with one command. It creates the repository when it does not exist, mirrors later ZIP snapshots into the existing repository while preserving Git history, and can optionally publish GitHub Releases with assets.
 
-GitMake treats the source ZIP as the latest repository snapshot. If the GitHub repository does not exist, it creates one and pushes an initial commit. If it already exists, GitMake clones it into a temporary workspace, preserves `.git`, mirrors the ZIP snapshot, commits changes, and pushes. v0.2.0 can then create a tagged GitHub Release and upload local files such as Windows builds and source archives.
+v0.3.0 adds an installable Windows CLI and a cleaner daily workflow:
+
+```powershell
+gitmake
+```
+
+## Install on Windows
+
+### Easiest
+
+Unzip the Windows package and double-click:
+
+```text
+GitMake-Setup.exe
+```
+
+The setup program copies `gitmake.exe` to:
+
+```text
+%LOCALAPPDATA%\Programs\GitMake\gitmake.exe
+```
+
+and adds that directory to the current user's PATH. No administrator permission is required. Open a new PowerShell/Terminal window after installation.
+
+### From the portable binary
+
+```powershell
+.\gitmake.exe install
+```
+
+Then verify the environment:
+
+```powershell
+gitmake doctor
+```
 
 ## Requirements
 
-- Git installed and available as `git`
-- GitHub CLI installed and available as `gh`
-- One-time authentication: `gh auth login`
-- Git commit identity configured when a commit is needed:
-  - `git config --global user.name "Your Name"`
-  - `git config --global user.email "you@example.com"`
+GitMake intentionally delegates Git/GitHub authentication to the standard tools:
 
-`gitmake.exe` itself does not require Go or another runtime.
+- Git available as `git`
+- GitHub CLI available as `gh`
+- GitHub login: `gh auth login`
+- Git commit identity (`user.name` and `user.email`)
 
-## Fastest Windows workflow
+GitMake itself is a single native executable and does not require Go at runtime.
 
-Put one project ZIP beside `gitmake.exe` and double-click it.
+## Daily workflow
+
+Put a project ZIP in a folder:
 
 ```text
-work-folder/
-├─ gitmake.exe
-└─ ContextDiet_v0.2.0_Source.zip
+ContextDiet-release/
+└─ ContextDiet_v0.4.0.zip
 ```
 
-If `gitmake.json` does not exist, GitMake creates it. When exactly one ZIP is present, GitMake automatically selects the ZIP, derives a repository name such as `ContextDiet`, and continues in the same run.
+Open a terminal in that folder and run:
 
-If no ZIP is present yet, GitMake creates a starter JSON and shows an onboarding message instead of failing. Add one ZIP and run it again; placeholder values are repaired automatically.
+```powershell
+gitmake
+```
 
-A minimal explicit config:
+With one ZIP and no config, GitMake automatically creates `gitmake.json`, derives the repository name, validates the ZIP, and continues in the same run.
+
+Later, replace the ZIP contents/version and run `gitmake` again. If the GitHub repository already exists, GitMake clones it, preserves `.git`, mirrors the ZIP snapshot, commits only real changes, and pushes.
+
+### Explicit ZIP
+
+If multiple ZIP files are present, select the source directly:
+
+```powershell
+gitmake ContextDiet_v0.4.0_Source.zip
+```
+
+GitMake never guesses when multiple ZIPs are ambiguous.
+
+## CLI
+
+```text
+gitmake                     Publish/update current project
+gitmake Project.zip         Publish using a specific source ZIP
+gitmake init [Project.zip]  Create gitmake.json
+gitmake doctor              Check Git, gh, login, identity, and PATH
+gitmake install             Install GitMake for the current Windows user
+gitmake upgrade             Upgrade from the latest GitMake GitHub Release
+gitmake help                Show help
+```
+
+Common flags:
+
+```text
+--dry-run       Preview without modifying GitHub
+--no-release    Skip configured GitHub Release creation
+--verbose       Print external git/gh commands
+--keep-temp     Keep the temporary workspace for debugging
+--create-only   Refuse to update an existing repository
+--update-only   Refuse to create a missing repository
+--config PATH   Use another JSON config
+--version       Print version
+```
+
+## `gitmake doctor`
+
+Example healthy output:
+
+```text
+GitMake Doctor · 0.3.0
+
+✓ Git              git version 2.x
+✓ GitHub CLI       gh version 2.x
+✓ GitHub login     your-user
+✓ Git identity     Your Name <you@example.com>
+✓ PATH             gitmake command is available
+
+Everything looks good.
+```
+
+When a dependency is missing, GitMake's normal error output also points to `gitmake doctor` and the relevant fix.
+
+## Configuration
+
+A minimal generated configuration looks like:
 
 ```json
 {
   "schema_version": 1,
   "repo": {
     "name": "ContextDiet",
-    "description": "Fast file context optimizer",
     "visibility": "private"
   },
   "source": {
-    "zip": "ContextDiet_v0.2.0_Source.zip",
+    "zip": "ContextDiet_v0.4.0.zip",
     "strip_root": true
   },
   "git": {
     "branch": "main",
     "initial_commit_message": "Initial commit",
-    "commit_message": "Update ContextDiet v0.2.0"
+    "commit_message": "Update repository"
   }
 }
 ```
 
-UTF-8 JSON with or without a UTF-8 BOM is accepted. UTF-16 JSON is rejected with a clear encoding error.
+To make a repository public, change:
+
+```json
+"visibility": "public"
+```
 
 ## Automatic GitHub Releases
 
-Add a `release` block:
+Add a release block:
 
 ```json
 {
-  "schema_version": 1,
-  "repo": {
-    "name": "ContextDiet",
-    "visibility": "public"
-  },
-  "source": {
-    "zip": "ContextDiet_v0.2.0_Source.zip",
-    "strip_root": true
-  },
-  "git": {
-    "branch": "main",
-    "commit_message": "Release v0.2.0"
-  },
   "release": {
     "enabled": true,
-    "tag": "v0.2.0",
-    "title": "ContextDiet v0.2.0",
+    "tag": "v0.4.0",
+    "title": "ContextDiet v0.4.0",
     "generate_notes": true,
     "assets": [
-      "ContextDiet_v0.2.0_Windows_x64.zip",
-      "ContextDiet_v0.2.0_Source.zip"
+      "ContextDiet_v0.4.0_Windows_x64.zip",
+      "ContextDiet_v0.4.0_Source.zip"
     ],
     "on_existing": "error"
   }
 }
 ```
 
-Then one run performs:
+A normal run then performs repository create/update first and Release publication second. Release assets and release-note files are validated before repository mutation.
 
-```text
-validate source + release files
-        ↓
-CREATE or UPDATE repository
-        ↓
-commit + push
-        ↓
-create tag/release
-        ↓
-upload configured assets
-```
+`on_existing` can be `error` (safe default) or `skip`.
 
-Release creation happens only after the repository push succeeds. GitMake validates release assets and a notes file before mutating the repository, so a missing local artifact fails early.
+## Upgrade
 
-A release can still be created when the repository snapshot has no new changes. This is useful when the Git commit is already present but the release publication step previously failed or was intentionally delayed.
-
-### Release fields
-
-| Field | Behavior |
-|---|---|
-| `enabled` | Enables release publication |
-| `tag` | Required Git tag, e.g. `v0.2.0` |
-| `title` | Optional release title |
-| `notes` | Inline release notes |
-| `notes_file` | Release notes file relative to `gitmake.json` |
-| `generate_notes` | Ask GitHub to generate release notes; defaults to `true` when no notes are supplied |
-| `assets` | Local files to upload; relative paths are resolved beside `gitmake.json` |
-| `draft` | Create a draft release |
-| `prerelease` | Mark as prerelease |
-| `latest` | Optional explicit `true`/`false` Latest setting |
-| `on_existing` | `error` (default) or `skip` when the release tag already exists |
-
-`notes` and `notes_file` are mutually exclusive. Generated notes can also be explicitly enabled alongside `notes` or `notes_file`. If generation is explicitly disabled, one of those note sources is required so the CLI stays non-interactive.
-
-GitMake rejects duplicate release asset basenames and asset paths containing `#`, because GitHub CLI uses `#` as an asset label separator.
-
-### Duplicate releases
-
-The safe default is:
-
-```json
-"on_existing": "error"
-```
-
-If `v0.2.0` already exists, GitMake stops before committing or pushing a new source update. This helps catch the common mistake of changing code without bumping the release tag.
-
-If you intentionally want repeat runs to ignore an existing release:
-
-```json
-"on_existing": "skip"
-```
-
-The repository may still be updated, but the existing release is left untouched.
-
-### Skip release for one run
+Installed or portable Windows builds can ask the public GitMake repository for the latest Release:
 
 ```powershell
-.\gitmake.exe --no-release
+gitmake upgrade
 ```
 
-This keeps the `release` config intact but suppresses release publication for the current run.
+GitMake downloads the matching `GitMake_vX.Y.Z_Windows_x64.zip`, stages the new executable, exits, and lets a small replacement helper swap the executable after the running process releases the file.
 
-## Automatic recovery
+## Clean output
 
-GitMake repairs common first-run problems automatically:
-
-- `YOUR_PROJECT.zip` remains in a starter config and one ZIP is later added -> selects that ZIP and updates the JSON.
-- `YOUR_REPOSITORY` remains -> derives a repository name from the ZIP.
-- configured ZIP was renamed/removed and exactly one ZIP remains -> rebinds `source.zip` to that ZIP.
-- multiple possible ZIPs -> stops and lists the candidates instead of guessing.
-- existing GitHub repository is empty -> creates the configured branch, commits the ZIP, and pushes.
-- generated config says `main` but an existing legacy repository only has another default branch such as `master` -> uses the existing default branch and reports the fallback.
-
-When a release is enabled and multiple ZIP files exist beside GitMake, set `source.zip` explicitly. Release asset ZIP files count as ZIP candidates during first-run auto-discovery.
-
-## Double-click behavior
-
-When launched directly from Explorer, GitMake switches to the directory containing `gitmake.exe`, so the JSON and files beside it are found reliably. The console waits for Enter before closing.
-
-`RUN_GITMAKE.bat` is also included and always pauses after execution.
-
-## Dry run
-
-```powershell
-.\gitmake.exe --dry-run
-```
-
-A dry run performs discovery, validation, repository detection, staging, release conflict checks, and release-file validation, but does not create a remote repository, commit, push, tag, release, or upload assets.
-
-## Flags
+Normal operation intentionally avoids verbose step counters:
 
 ```text
---config PATH       Config path (default: gitmake.json)
---dry-run           Do not create/commit/push/release
---verbose           Print external commands
---keep-temp         Keep temporary workspace
---create-only       Fail if repository already exists
---update-only       Fail if repository does not exist
---no-release        Skip configured release creation for this run
---version           Print version
+GitMake 0.3.0
+
+  GitMake
+  stickleetoto/GitMake · public
+
+✓ Source validated      34 files
+✓ Repository updated    +3 ~7 -1
+✓ Pushed                main
+✓ Released              v0.3.0 · 2 assets
+  https://github.com/stickleetoto/GitMake/releases/tag/v0.3.0
+
+Done in 2.8s
 ```
 
-## Snapshot update semantics
+Use `--verbose` only when the underlying external commands are needed for debugging.
 
-The source ZIP is authoritative for repository files.
+## Snapshot semantics
+
+The source ZIP is authoritative for repository working-tree files:
 
 ```text
-existing repo clone
-      ↓
+existing repository clone
+        ↓
 preserve .git
-      ↓
-remove old working-tree files
-      ↓
-copy ZIP snapshot
-      ↓
+        ↓
+mirror ZIP snapshot
+        ↓
 git add -A
-      ↓
-commit + push only if changed
+        ↓
+commit only if changed
+        ↓
+push
 ```
 
-A file that exists in GitHub but is absent from the new source ZIP is deleted in the update commit.
+Files removed from a new ZIP are therefore removed in the new repository commit instead of lingering forever.
 
-## ZIP safety and Windows compatibility
+## Safety
 
-GitMake rejects archives containing:
+GitMake deliberately does **not** implement repository deletion, force push, history rewriting, Release deletion, or destructive remote cleanup.
 
-- absolute paths or drive-absolute paths
-- any `..` traversal component, including embedded paths such as `a/../b`
-- any `.git` path, case-insensitive
-- symlinks or unsupported special file types
-- Windows-reserved device names such as `CON`, `NUL`, `COM1`, `LPT1`
-- Windows-invalid characters or components ending in a dot/space
-- case-colliding paths such as `A.txt` and `a.txt`
-- file/directory path conflicts
-- invalid UTF-8 path names
-- more than 100,000 ZIP entries
-- more than 8 GiB declared or actually extracted content
+ZIP validation rejects path traversal, absolute paths, `.git`, symlinks/special files, Windows reserved names, Windows-invalid paths, case-collisions, file/directory conflicts, invalid UTF-8 names, excessive entry counts, and oversized extracted content.
 
-The source ZIP and JSON are never modified except when GitMake intentionally repairs its own starter JSON fields. Git operations run in a temporary workspace.
+Source archives are processed in temporary workspaces. Git history is preserved on updates.
 
-## `strip_root`
-
-`"strip_root": true` is the default.
-
-```text
-ZIP:
-ContextDiet/
-├─ README.md
-└─ src/
-
-Repository:
-README.md
-src/
-```
-
-If the ZIP already has files at its root, GitMake keeps that layout instead of stripping a directory incorrectly.
-
-## Build and test
+## Build
 
 ```powershell
 .\build.ps1
 ```
 
-Or:
+or:
 
 ```text
 go test ./...
@@ -259,8 +247,4 @@ go vet ./...
 go build -o gitmake.exe ./cmd/gitmake
 ```
 
-A regression harness for CREATE/UPDATE/release flows with a fake GitHub CLI is included at `scripts/e2e.sh`.
-
-## Safety scope
-
-GitMake v0.2.0 intentionally does not implement repository deletion, force push, history rewrite, PR management, Issues, Actions management, release deletion, or release asset overwrite. Existing releases are either rejected or skipped according to explicit config.
+The Windows build scripts create both `gitmake.exe` and `GitMake-Setup.exe`.

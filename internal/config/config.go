@@ -225,7 +225,7 @@ func EnsureStarter(path string) (bool, error) {
 	}
 
 	dir := filepath.Dir(path)
-	zips, err := discoverZIPs(dir)
+	zips, err := DiscoverZIPs(dir)
 	if err != nil {
 		return false, err
 	}
@@ -285,7 +285,7 @@ func ResolveProjectZIP(configPath string, c *Config) (zipPath string, repaired b
 		return "", false, fmt.Errorf("source ZIP: %w", statErr)
 	}
 
-	zips, err := discoverZIPs(base)
+	zips, err := DiscoverZIPs(base)
 	if err != nil {
 		return "", false, err
 	}
@@ -315,7 +315,7 @@ func ResolveProjectZIP(configPath string, c *Config) (zipPath string, repaired b
 	return "", false, fmt.Errorf("%s", b.String())
 }
 
-func discoverZIPs(dir string) ([]string, error) {
+func DiscoverZIPs(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("scan config directory: %w", err)
@@ -363,4 +363,50 @@ func deriveRepoName(zipName string) string {
 		return placeholderRepo
 	}
 	return result
+}
+
+// CreateForZIP creates or replaces a GitMake configuration for an explicitly
+// selected ZIP. It is intended for `gitmake init <zip>` and the positional ZIP
+// workflow. Existing configs are only overwritten when overwrite is true.
+func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
+	if !overwrite {
+		if _, err := os.Stat(configPath); err == nil {
+			return Config{}, fmt.Errorf("configuration already exists: %s", configPath)
+		} else if !os.IsNotExist(err) {
+			return Config{}, err
+		}
+	}
+	absZip, err := filepath.Abs(zipPath)
+	if err != nil {
+		return Config{}, err
+	}
+	info, err := os.Stat(absZip)
+	if err != nil {
+		return Config{}, fmt.Errorf("source ZIP: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return Config{}, fmt.Errorf("source ZIP must be a regular file: %s", absZip)
+	}
+	if !strings.EqualFold(filepath.Ext(absZip), ".zip") {
+		return Config{}, fmt.Errorf("source must be a .zip file: %s", absZip)
+	}
+	base := filepath.Dir(configPath)
+	rel, err := filepath.Rel(base, absZip)
+	if err != nil {
+		rel = absZip
+	}
+	if strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rel = absZip
+	}
+	strip := true
+	cfg := Config{
+		SchemaVersion: CurrentSchemaVersion,
+		Repo:          RepoConfig{Name: deriveRepoName(filepath.Base(absZip)), Visibility: "private"},
+		Source:        SourceConfig{ZIP: rel, StripRoot: &strip},
+		Git:           GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"},
+	}
+	if err := Save(configPath, cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
