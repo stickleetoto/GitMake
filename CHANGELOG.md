@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.0
+- Added automatic GitHub Release creation after a successful repository create/update.
+- Added release configuration: tag, title, inline notes, notes file, generated notes, assets, draft, prerelease, latest, and duplicate-tag policy.
+- Release assets and notes files are validated before any repository mutation, preventing a missing local artifact from causing a half-finished update.
+- Existing release tags fail early by default; `release.on_existing: "skip"` provides explicit idempotent skip behavior.
+- Added exact Git tag validation through `git check-ref-format`.
+- New releases can be created even when the repository snapshot itself has no changes.
+- Added `--no-release` to update/create the repository without publishing the configured release.
+- `--dry-run` now previews release creation and asset upload as well as Git changes.
+- Release target follows the actual branch used by GitMake, including legacy default-branch fallback.
+- Added release regression coverage for CREATE, no-change release, duplicate tags, skip behavior, missing assets, dry-run, `--no-release`, and invalid tags.
+
 ## v0.1.3
 - Fixed the v0.1.2 `YOUR_PROJECT.zip` trap: starter placeholders now self-repair when a ZIP is added later.
 - First run with exactly one ZIP now creates the config and continues in the same invocation.

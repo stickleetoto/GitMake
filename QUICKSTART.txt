@@ -1,4 +1,4 @@
-GitMake v0.1.3 - Windows x64 Quick Start
+GitMake v0.2.0 - Windows x64 Quick Start
 
 REQUIREMENTS
 - Git installed
@@ -8,37 +8,52 @@ REQUIREMENTS
     git config --global user.name "Your Name"
     git config --global user.email "you@example.com"
 
-FASTEST USE
+FASTEST REPOSITORY USE
 1. Extract this GitMake package.
 2. Put exactly one project ZIP beside gitmake.exe.
 3. Double-click gitmake.exe.
 
 Example:
   gitmake.exe
-  ContextDiet_v0.1.0.zip
+  ContextDiet_v0.2.0_Source.zip
 
-GitMake will create gitmake.json automatically, select the ZIP, derive the
-repository name, check Git/GitHub, and CREATE or UPDATE the repository.
+GitMake creates gitmake.json automatically, selects the ZIP, derives the
+repository name, and CREATEs or UPDATEs the GitHub repository.
 
-IF YOU RAN IT BEFORE ADDING THE ZIP
-No problem. GitMake creates a starter gitmake.json and exits normally.
-Add one ZIP beside it and run again. v0.1.3 automatically repairs:
-  YOUR_PROJECT.zip -> actual ZIP filename
-  YOUR_REPOSITORY  -> derived repository name
+AUTOMATIC GITHUB RELEASES
+For releases, provide gitmake.json explicitly and add a release section:
+
+  "release": {
+    "enabled": true,
+    "tag": "v0.2.0",
+    "title": "ContextDiet v0.2.0",
+    "generate_notes": true,
+    "assets": [
+      "ContextDiet_v0.2.0_Windows_x64.zip",
+      "ContextDiet_v0.2.0_Source.zip"
+    ],
+    "on_existing": "error"
+  }
+
+All asset paths are relative to gitmake.json unless absolute paths are used.
+Release creation happens only after the repository commit/push succeeds.
+If the source snapshot has no changes, a new configured release can still be
+created. Reusing an existing release tag fails by default; use
+"on_existing": "skip" only when that behavior is intentional.
+
+NOTES
+- "notes_file": "RELEASE_NOTES.md" uses a local UTF-8 text/Markdown file.
+- "notes": "..." embeds notes directly in JSON.
+- If neither notes nor notes_file is set, generated release notes default on.
+- "draft": true and "prerelease": true are supported.
+- "latest": true/false can explicitly control the Latest flag.
+- .\gitmake.exe --no-release skips release creation for one run.
+- .\gitmake.exe --dry-run previews both repository and release work.
 
 IF MULTIPLE ZIP FILES ARE PRESENT
-GitMake does not guess. Open gitmake.json and set:
-  "source": { "zip": "the-file-you-want.zip" }
+GitMake does not guess which ZIP is the source. Set source.zip explicitly in
+gitmake.json. Release asset ZIPs do not need to be inside the source ZIP.
 
-NORMAL FILES
-  gitmake.exe
-  gitmake.json
-  your-project.zip
-
-TERMINAL
-  .\gitmake.exe --dry-run
-  .\gitmake.exe --verbose
-  .\gitmake.exe
-
-Double-click mode waits for Enter before closing.
+DOUBLE-CLICK
+Explorer double-click mode waits for Enter before closing.
 RUN_GITMAKE.bat is included as an always-pause fallback.

@@ -66,3 +66,13 @@ func TestPrepareUpdateBranchFallsBackToDefault(t *testing.T) {
 		t.Fatalf("branch=%q fallback=%v", branch, fallback)
 	}
 }
+
+func TestValidateTag(t *testing.T) {
+	c := Client{Run: runner.Runner{}}
+	if err := c.ValidateTag("v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ValidateTag("bad tag"); err == nil {
+		t.Fatal("expected invalid tag to fail")
+	}
+}

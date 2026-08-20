@@ -131,3 +131,87 @@ func message(res runner.Result) string {
 	}
 	return fmt.Sprintf("exit code %d", res.Code)
 }
+
+type ReleaseInfo struct {
+	URL          string `json:"url"`
+	TagName      string `json:"tagName"`
+	IsDraft      bool   `json:"isDraft"`
+	IsPrerelease bool   `json:"isPrerelease"`
+}
+
+type ReleaseCreateOptions struct {
+	Tag           string
+	Target        string
+	Title         string
+	Notes         string
+	NotesFile     string
+	GenerateNotes bool
+	Assets        []string
+	Draft         bool
+	Prerelease    bool
+	Latest        *bool
+}
+
+func (c Client) Release(target, tag string) (ReleaseInfo, bool, error) {
+	res, err := c.Run.Run("", "gh", "release", "view", tag, "--repo", target, "--json", "url,tagName,isDraft,isPrerelease")
+	if err != nil {
+		return ReleaseInfo{}, false, err
+	}
+	if res.Code != 0 {
+		combined := res.Stdout + "\n" + res.Stderr
+		if notFoundRE.MatchString(combined) {
+			return ReleaseInfo{}, false, nil
+		}
+		return ReleaseInfo{}, false, fmt.Errorf("check release %s in %s: %s", tag, target, message(res))
+	}
+	var info ReleaseInfo
+	if err := json.Unmarshal([]byte(res.Stdout), &info); err != nil {
+		return ReleaseInfo{}, false, fmt.Errorf("parse gh release view output: %w", err)
+	}
+	return info, true, nil
+}
+
+func (c Client) CreateRelease(target string, o ReleaseCreateOptions) (string, error) {
+	args := []string{"release", "create", o.Tag}
+	args = append(args, o.Assets...)
+	args = append(args, "--repo", target)
+	if o.Target != "" {
+		args = append(args, "--target", o.Target)
+	}
+	if o.Title != "" {
+		args = append(args, "--title", o.Title)
+	}
+	if o.NotesFile != "" {
+		args = append(args, "--notes-file", o.NotesFile)
+	} else if o.Notes != "" {
+		args = append(args, "--notes", o.Notes)
+	}
+	if o.GenerateNotes {
+		args = append(args, "--generate-notes")
+	}
+	if o.Draft {
+		args = append(args, "--draft")
+	}
+	if o.Prerelease {
+		args = append(args, "--prerelease")
+	}
+	if o.Latest != nil {
+		args = append(args, fmt.Sprintf("--latest=%t", *o.Latest))
+	}
+
+	res, err := c.Run.Run("", "gh", args...)
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("create GitHub release %s: %s", o.Tag, message(res))
+	}
+	url := strings.TrimSpace(res.Stdout)
+	if url == "" {
+		view, exists, err := c.Release(target, o.Tag)
+		if err == nil && exists {
+			url = view.URL
+		}
+	}
+	return url, nil
+}

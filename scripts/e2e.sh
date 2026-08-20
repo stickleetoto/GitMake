@@ -54,6 +54,52 @@ if [[ "${1:-}" == "repo" && "${2:-}" == "create" ]]; then
   echo "https://example.test/$target"
   exit 0
 fi
+if [[ "${1:-}" == "release" && "${2:-}" == "view" ]]; then
+  tag="$3"; shift 3; target=""
+  while (($#)); do
+    case "$1" in
+      --repo) target="$2"; shift 2;;
+      --json) shift 2;;
+      --jq) jqexpr="$2"; shift 2;;
+      *) shift;;
+    esac
+  done
+  rel="$(dirname "$root")/releases/$target/$tag"
+  if [[ ! -d "$rel" ]]; then echo "release not found" >&2; exit 1; fi
+  url="https://example.test/$target/releases/tag/$tag"
+  if [[ "${jqexpr:-}" == ".url" ]]; then echo "$url"; exit 0; fi
+  printf '{"url":"%s","tagName":"%s","isDraft":false,"isPrerelease":false}\n' "$url" "$tag"
+  exit 0
+fi
+if [[ "${1:-}" == "release" && "${2:-}" == "create" ]]; then
+  tag="$3"; shift 3; target=""; target_branch=""; assets=()
+  while (($#)); do
+    case "$1" in
+      --repo) target="$2"; shift 2;;
+      --target) target_branch="$2"; shift 2;;
+      --title|--notes|--notes-file) shift 2;;
+      --generate-notes|--draft|--prerelease) shift;;
+      --latest=*) shift;;
+      --*) echo "fake gh: unsupported release flag: $1" >&2; exit 2;;
+      *) assets+=("$1"); shift;;
+    esac
+  done
+  if [[ -z "$target" ]]; then echo "missing --repo" >&2; exit 2; fi
+  owner="${target%%/*}"; repo="${target#*/}"; remote="$root/$owner/$repo.git"
+  if [[ ! -d "$remote" ]]; then echo "repository not found" >&2; exit 1; fi
+  if [[ -n "$target_branch" ]] && ! git --git-dir="$remote" rev-parse --verify "refs/heads/$target_branch" >/dev/null 2>&1; then
+    echo "target branch not found" >&2; exit 1
+  fi
+  rel="$(dirname "$root")/releases/$target/$tag"
+  if [[ -d "$rel" ]]; then echo "release already exists" >&2; exit 1; fi
+  mkdir -p "$rel/assets"
+  printf '%s\n' "$target_branch" > "$rel/target"
+  for asset in "${assets[@]}"; do
+    cp "$asset" "$rel/assets/$(basename "$asset")"
+  done
+  echo "https://example.test/$target/releases/tag/$tag"
+  exit 0
+fi
 echo "fake gh: unsupported args: $*" >&2
 exit 2
 GH
@@ -178,5 +224,79 @@ printf '%s\n' '{"repo":{"name":"Collision"},"source":{"zip":"bad.zip"},"git":{}}
 makezip "$N/bad.zip" 'root/A.txt=A' 'root/a.txt=a'
 if (cd "$N" && "$BIN" >collision.log 2>&1); then exit 15; fi
 grep -q 'case-colliding' "$N/collision.log"
+
+# O. CREATE can publish a GitHub release and upload assets.
+O="$TMP/release"; mkdir -p "$O"
+makezip "$O/payload.zip" 'root/app.txt=v1'
+echo binary > "$O/app-win.zip"
+printf '%s\n' '{"repo":{"name":"ReleaseRepo"},"source":{"zip":"payload.zip"},"git":{},"release":{"enabled":true,"tag":"v1.0.0","title":"ReleaseRepo v1.0.0","notes":"first release","assets":["app-win.zip"]}}' > "$O/gitmake.json"
+(cd "$O" && "$BIN" >release-create.log 2>&1)
+test -d "$TMP/releases/testuser/ReleaseRepo/v1.0.0"
+test -f "$TMP/releases/testuser/ReleaseRepo/v1.0.0/assets/app-win.zip"
+grep -q 'Released: v1.0.0' "$O/release-create.log"
+
+# P. A new release can be created even when the repository snapshot has no changes.
+python - "$O/gitmake.json" <<'PY2'
+import json, sys
+p=sys.argv[1]; d=json.load(open(p)); d['release']['tag']='v1.0.1'; d['release']['title']='ReleaseRepo v1.0.1'; json.dump(d, open(p,'w'), indent=2)
+PY2
+count_before="$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)"
+(cd "$O" && "$BIN" >release-nochange.log 2>&1)
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before"
+test -d "$TMP/releases/testuser/ReleaseRepo/v1.0.1"
+grep -q 'No changes detected' "$O/release-nochange.log"
+
+# Q. Duplicate release defaults to an early error and does not push source changes.
+makezip "$O/payload.zip" 'root/app.txt=should-not-push'
+if (cd "$O" && "$BIN" >release-duplicate.log 2>&1); then exit 16; fi
+grep -q 'already exists' "$O/release-duplicate.log"
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before"
+
+# R. on_existing=skip permits a source update while leaving the existing release alone.
+python - "$O/gitmake.json" <<'PY2'
+import json, sys
+p=sys.argv[1]; d=json.load(open(p)); d['release']['on_existing']='skip'; json.dump(d, open(p,'w'), indent=2)
+PY2
+(cd "$O" && "$BIN" >release-skip.log 2>&1)
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = $((count_before+1))
+grep -q 'already exists — skipped' "$O/release-skip.log"
+
+# S. Missing release asset fails before a new source change is committed.
+python - "$O/gitmake.json" <<'PY2'
+import json, sys
+p=sys.argv[1]; d=json.load(open(p)); d['release']['tag']='v1.0.2'; d['release']['on_existing']='error'; d['release']['assets']=['missing.zip']; json.dump(d, open(p,'w'), indent=2)
+PY2
+makezip "$O/payload.zip" 'root/app.txt=missing-asset-change'
+count_before_missing="$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)"
+if (cd "$O" && "$BIN" >release-missing.log 2>&1); then exit 17; fi
+grep -q 'release asset not found' "$O/release-missing.log"
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before_missing"
+
+# T. Dry-run previews a release but creates neither commit nor release.
+python - "$O/gitmake.json" <<'PY2'
+import json, sys
+p=sys.argv[1]; d=json.load(open(p)); d['release']['assets']=['app-win.zip']; json.dump(d, open(p,'w'), indent=2)
+PY2
+(cd "$O" && "$BIN" --dry-run >release-dry.log 2>&1)
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before_missing"
+test ! -d "$TMP/releases/testuser/ReleaseRepo/v1.0.2"
+grep -q 'release v1.0.2 will NOT be created' "$O/release-dry.log"
+
+# U. --no-release updates GitHub but suppresses the configured release.
+(cd "$O" && "$BIN" --no-release >release-norelease.log 2>&1)
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = $((count_before_missing+1))
+test ! -d "$TMP/releases/testuser/ReleaseRepo/v1.0.2"
+grep -q 'Release skipped (--no-release)' "$O/release-norelease.log"
+
+# V. Invalid Git tag is rejected before repository mutation.
+python - "$O/gitmake.json" <<'PY2'
+import json, sys
+p=sys.argv[1]; d=json.load(open(p)); d['release']['tag']='bad tag'; json.dump(d, open(p,'w'), indent=2)
+PY2
+makezip "$O/payload.zip" 'root/app.txt=invalid-tag-change'
+count_before_badtag="$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)"
+if (cd "$O" && "$BIN" >release-badtag.log 2>&1); then exit 18; fi
+grep -q 'not a valid Git tag name' "$O/release-badtag.log"
+test "$(git --git-dir="$TMP/remotes/testuser/ReleaseRepo.git" rev-list --count HEAD)" = "$count_before_badtag"
 
 echo "ALL_E2E_PASS"

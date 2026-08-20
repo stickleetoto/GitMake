@@ -16,7 +16,7 @@ import (
 	"gitmake/internal/syncer"
 )
 
-const Version = "0.1.3"
+const Version = "0.2.0"
 
 type Options struct {
 	ConfigPath string
@@ -25,6 +25,7 @@ type Options struct {
 	KeepTemp   bool
 	CreateOnly bool
 	UpdateOnly bool
+	NoRelease  bool
 }
 
 func Main(args []string) int {
@@ -50,6 +51,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.KeepTemp, "keep-temp", false, "keep temporary workspace for debugging")
 	fs.BoolVar(&o.CreateOnly, "create-only", false, "fail if the GitHub repository already exists")
 	fs.BoolVar(&o.UpdateOnly, "update-only", false, "fail if the GitHub repository does not exist")
+	fs.BoolVar(&o.NoRelease, "no-release", false, "skip release creation even when release.enabled is true")
 	version := fs.Bool("version", false, "print version")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
@@ -78,7 +80,7 @@ func Run(o Options) error {
 	}
 
 	fmt.Printf("GitMake v%s\n", Version)
-	fmt.Println("[1/7] Loading configuration")
+	fmt.Println("[1/8] Loading configuration")
 	created, err := config.EnsureStarter(configPath)
 	if err != nil {
 		return err
@@ -108,7 +110,7 @@ func Run(o Options) error {
 	git := gitops.Client{Run: run}
 	gh := github.Client{Run: run}
 
-	fmt.Println("[2/7] Checking Git and GitHub CLI")
+	fmt.Println("[2/8] Checking Git and GitHub CLI")
 	if err := git.Preflight(); err != nil {
 		return err
 	}
@@ -125,7 +127,7 @@ func Run(o Options) error {
 	}
 	target := owner + "/" + cfg.Repo.Name
 
-	fmt.Printf("[3/7] Checking repository %s\n", target)
+	fmt.Printf("[3/8] Checking repository %s\n", target)
 	repoInfo, exists, err := gh.Repo(owner, cfg.Repo.Name)
 	if err != nil {
 		return err
@@ -135,6 +137,11 @@ func Run(o Options) error {
 	}
 	if !exists && o.UpdateOnly {
 		return fmt.Errorf("repository %s does not exist (--update-only)", target)
+	}
+
+	release, err := prepareReleasePlan(configPath, target, exists, cfg, o.NoRelease, git, gh)
+	if err != nil {
+		return err
 	}
 
 	work, err := os.MkdirTemp("", "gitmake-*")
@@ -148,7 +155,7 @@ func Run(o Options) error {
 	}
 
 	snapshot := filepath.Join(work, "snapshot")
-	fmt.Println("[4/7] Validating and extracting ZIP")
+	fmt.Println("[4/8] Validating and extracting ZIP")
 	files, err := archive.ExtractSafe(zipPath, snapshot, *cfg.Source.StripRoot)
 	if err != nil {
 		return err
@@ -158,13 +165,13 @@ func Run(o Options) error {
 	}
 
 	if exists {
-		return updateFlow(o, cfg, target, repoInfo.URL, repoInfo.DefaultBranch(), snapshot, work, git, gh)
+		return updateFlow(o, cfg, target, repoInfo.URL, repoInfo.DefaultBranch(), snapshot, work, git, gh, release)
 	}
-	return createFlow(o, cfg, target, snapshot, git, gh)
+	return createFlow(o, cfg, target, snapshot, git, gh, release)
 }
 
-func createFlow(o Options, cfg config.Config, target, snapshot string, git gitops.Client, gh github.Client) error {
-	fmt.Println("[5/7] Mode: CREATE")
+func createFlow(o Options, cfg config.Config, target, snapshot string, git gitops.Client, gh github.Client, release releasePlan) error {
+	fmt.Println("[5/8] Mode: CREATE")
 	if err := git.Init(snapshot, cfg.Git.Branch); err != nil {
 		return err
 	}
@@ -184,21 +191,21 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	}
 
 	if o.DryRun {
-		fmt.Println("[6/7] Dry run — GitHub repository will NOT be created")
+		fmt.Println("[6/8] Dry run — GitHub repository will NOT be created")
 		printDiff(diff)
-		fmt.Printf("[7/7] Planned repository: %s (%s)\n", target, cfg.Repo.Visibility)
-		return nil
+		fmt.Printf("[7/8] Planned repository: %s (%s)\n", target, cfg.Repo.Visibility)
+		return finishRelease(release, target, cfg.Git.Branch, true, gh)
 	}
 
 	if err := git.EnsureIdentity(snapshot); err != nil {
 		return err
 	}
-	fmt.Println("[6/7] Creating initial commit")
+	fmt.Println("[6/8] Creating initial commit")
 	if err := git.Commit(snapshot, cfg.Git.InitialCommitMessage); err != nil {
 		return err
 	}
 
-	fmt.Println("[7/7] Creating GitHub repository and pushing")
+	fmt.Println("[7/8] Creating GitHub repository and pushing")
 	url, err := gh.CreateAndPush(target, cfg.Repo.Visibility, cfg.Repo.Description, snapshot)
 	if err != nil {
 		return err
@@ -207,11 +214,11 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	if url != "" {
 		fmt.Println(url)
 	}
-	return nil
+	return finishRelease(release, target, cfg.Git.Branch, false, gh)
 }
 
-func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch, snapshot, work string, git gitops.Client, gh github.Client) error {
-	fmt.Println("[5/7] Mode: UPDATE")
+func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch, snapshot, work string, git gitops.Client, gh github.Client, release releasePlan) error {
+	fmt.Println("[5/8] Mode: UPDATE")
 	repoDir := filepath.Join(work, "repo")
 	if err := gh.Clone(target, repoDir); err != nil {
 		return err
@@ -234,12 +241,12 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		return err
 	}
 	if !changed {
-		fmt.Println("[6/7] No changes detected")
-		fmt.Println("[7/7] Nothing to commit or push")
+		fmt.Println("[6/8] No changes detected")
+		fmt.Println("[7/8] Nothing to commit or push")
 		if repoURL != "" {
 			fmt.Println(repoURL)
 		}
-		return nil
+		return finishRelease(release, target, branch, o.DryRun, gh)
 	}
 	diff, err := git.NameStatus(repoDir)
 	if err != nil {
@@ -247,23 +254,23 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	}
 
 	if o.DryRun {
-		fmt.Println("[6/7] Dry run — changes will NOT be committed or pushed")
+		fmt.Println("[6/8] Dry run — changes will NOT be committed or pushed")
 		printDiff(diff)
-		fmt.Println("[7/7] Repository unchanged")
+		fmt.Println("[7/8] Repository unchanged")
 		if repoURL != "" {
 			fmt.Println(repoURL)
 		}
-		return nil
+		return finishRelease(release, target, branch, true, gh)
 	}
 
 	if err := git.EnsureIdentity(repoDir); err != nil {
 		return err
 	}
-	fmt.Println("[6/7] Committing snapshot update")
+	fmt.Println("[6/8] Committing snapshot update")
 	if err := git.Commit(repoDir, cfg.Git.CommitMessage); err != nil {
 		return err
 	}
-	fmt.Println("[7/7] Pushing to GitHub")
+	fmt.Println("[7/8] Pushing to GitHub")
 	if err := git.Push(repoDir, branch); err != nil {
 		return err
 	}
@@ -271,7 +278,7 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	if repoURL != "" {
 		fmt.Println(repoURL)
 	}
-	return nil
+	return finishRelease(release, target, branch, false, gh)
 }
 
 func printDiff(diff string) {

@@ -29,10 +29,11 @@ var (
 )
 
 type Config struct {
-	SchemaVersion int          `json:"schema_version"`
-	Repo          RepoConfig   `json:"repo"`
-	Source        SourceConfig `json:"source"`
-	Git           GitConfig    `json:"git"`
+	SchemaVersion int           `json:"schema_version"`
+	Repo          RepoConfig    `json:"repo"`
+	Source        SourceConfig  `json:"source"`
+	Git           GitConfig     `json:"git"`
+	Release       ReleaseConfig `json:"release,omitempty"`
 }
 
 type RepoConfig struct {
@@ -51,6 +52,20 @@ type GitConfig struct {
 	Branch               string `json:"branch,omitempty"`
 	InitialCommitMessage string `json:"initial_commit_message,omitempty"`
 	CommitMessage        string `json:"commit_message,omitempty"`
+}
+
+type ReleaseConfig struct {
+	Enabled       bool     `json:"enabled,omitempty"`
+	Tag           string   `json:"tag,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Notes         string   `json:"notes,omitempty"`
+	NotesFile     string   `json:"notes_file,omitempty"`
+	GenerateNotes *bool    `json:"generate_notes,omitempty"`
+	Assets        []string `json:"assets,omitempty"`
+	Draft         bool     `json:"draft,omitempty"`
+	Prerelease    bool     `json:"prerelease,omitempty"`
+	Latest        *bool    `json:"latest,omitempty"`
+	OnExisting    string   `json:"on_existing,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -106,6 +121,16 @@ func applyDefaults(c *Config) {
 		v := true
 		c.Source.StripRoot = &v
 	}
+	if c.Release.Enabled {
+		if c.Release.GenerateNotes == nil {
+			v := c.Release.Notes == "" && c.Release.NotesFile == ""
+			c.Release.GenerateNotes = &v
+		}
+		if c.Release.OnExisting == "" {
+			c.Release.OnExisting = "error"
+		}
+		c.Release.OnExisting = strings.ToLower(c.Release.OnExisting)
+	}
 }
 
 func (c Config) Validate() error {
@@ -144,6 +169,30 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Git.CommitMessage) == "" {
 		return fmt.Errorf("git.commit_message must not be blank")
+	}
+	if c.Release.Enabled {
+		if strings.TrimSpace(c.Release.Tag) == "" {
+			return fmt.Errorf("release.tag is required when release.enabled is true")
+		}
+		if strings.ContainsAny(c.Release.Tag, "\r\n\t") {
+			return fmt.Errorf("release.tag contains control whitespace")
+		}
+		if c.Release.Notes != "" && c.Release.NotesFile != "" {
+			return fmt.Errorf("release.notes and release.notes_file cannot both be set")
+		}
+		if c.Release.GenerateNotes != nil && !*c.Release.GenerateNotes && c.Release.Notes == "" && c.Release.NotesFile == "" {
+			return fmt.Errorf("release requires notes, notes_file, or generate_notes=true to stay non-interactive")
+		}
+		switch c.Release.OnExisting {
+		case "error", "skip":
+		default:
+			return fmt.Errorf("release.on_existing must be error or skip")
+		}
+		for _, asset := range c.Release.Assets {
+			if strings.TrimSpace(asset) == "" {
+				return fmt.Errorf("release.assets must not contain blank paths")
+			}
+		}
 	}
 	return nil
 }

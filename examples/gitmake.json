@@ -6,12 +6,23 @@
     "visibility": "private"
   },
   "source": {
-    "zip": "ContextDiet_v0.1.0.zip",
+    "zip": "ContextDiet_v0.2.0_Source.zip",
     "strip_root": true
   },
   "git": {
     "branch": "main",
     "initial_commit_message": "Initial commit",
-    "commit_message": "Update ContextDiet v0.1.0"
+    "commit_message": "Update ContextDiet v0.2.0"
+  },
+  "release": {
+    "enabled": false,
+    "tag": "v0.2.0",
+    "title": "ContextDiet v0.2.0",
+    "generate_notes": true,
+    "assets": [
+      "ContextDiet_v0.2.0_Windows_x64.zip",
+      "ContextDiet_v0.2.0_Source.zip"
+    ],
+    "on_existing": "error"
   }
 }

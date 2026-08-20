@@ -81,3 +81,74 @@ func TestRejectUTF16Config(t *testing.T) {
 		t.Fatal("expected UTF-16 rejection")
 	}
 }
+
+func TestReleaseDefaults(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gitmake.json")
+	data := `{"repo":{"name":"demo"},"source":{"zip":"demo.zip"},"git":{},"release":{"enabled":true,"tag":"v1.0.0"}}`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Release.GenerateNotes == nil || !*c.Release.GenerateNotes {
+		t.Fatal("release.generate_notes should default true when no notes are supplied")
+	}
+	if c.Release.OnExisting != "error" {
+		t.Fatalf("release.on_existing=%q", c.Release.OnExisting)
+	}
+}
+
+func TestReleaseExplicitNotesDisableGeneratedNotesByDefault(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gitmake.json")
+	data := `{"repo":{"name":"demo"},"source":{"zip":"demo.zip"},"git":{},"release":{"enabled":true,"tag":"v1.0.0","notes":"hello"}}`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Release.GenerateNotes == nil || *c.Release.GenerateNotes {
+		t.Fatal("release.generate_notes should default false when explicit notes are supplied")
+	}
+}
+
+func TestReleaseRequiresTag(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gitmake.json")
+	data := `{"repo":{"name":"demo"},"source":{"zip":"demo.zip"},"git":{},"release":{"enabled":true}}`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected missing release.tag to fail")
+	}
+}
+
+func TestReleaseRejectsNotesAndNotesFileTogether(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gitmake.json")
+	data := `{"repo":{"name":"demo"},"source":{"zip":"demo.zip"},"git":{},"release":{"enabled":true,"tag":"v1.0.0","notes":"x","notes_file":"notes.md"}}`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected release.notes + release.notes_file to fail")
+	}
+}
+
+func TestReleaseRejectsNoNotesWhenGenerationDisabled(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "gitmake.json")
+	data := `{"repo":{"name":"demo"},"source":{"zip":"demo.zip"},"git":{},"release":{"enabled":true,"tag":"v1.0.0","generate_notes":false}}`
+	if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("expected non-interactive release validation to fail")
+	}
+}

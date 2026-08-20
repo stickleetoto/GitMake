@@ -179,6 +179,17 @@ func (c Client) Push(dir, branch string) error {
 	return nil
 }
 
+func (c Client) ValidateTag(tag string) error {
+	res, err := c.Run.Run("", "git", "check-ref-format", "refs/tags/"+tag)
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 {
+		return fmt.Errorf("release.tag is not a valid Git tag name: %q", tag)
+	}
+	return nil
+}
+
 func msg(res runner.Result) string {
 	if res.Stderr != "" {
 		return res.Stderr
