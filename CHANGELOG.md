@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.1
+
+- Fixed a Windows `gitmake doctor` false negative where `gitmake --version` worked but doctor still reported PATH as missing.
+- Doctor now checks the installed binary, actual command resolution, current-process PATH, and persisted per-user PATH independently.
+- Added a manual PATH scan fallback for `exec.LookPath` / `PATHEXT` edge cases.
+- Doctor now reports the resolved `gitmake.exe` path and distinguishes a stale shell from a broken installation.
+- `gitmake install` no longer tries to overwrite its own currently-running installed executable; it safely verifies/repairs PATH instead.
+- Hardened installer staging cleanup and replacement error reporting.
+- Added regression tests for Windows-style PATH matching and doctor health classification.
+
 ## v0.3.0
 
 ### Installable CLI

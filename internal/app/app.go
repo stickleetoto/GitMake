@@ -20,7 +20,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.3.0"
+const Version = "0.3.1"
 
 type Options struct {
 	Command     string
@@ -278,6 +278,9 @@ func runDoctor(o Options) error {
 			issues++
 		}
 	}
+	info := func(label, detail string) {
+		fmt.Printf("· %-16s %s\n", label, detail)
+	}
 
 	gitVer, err := run.Run("", "git", "--version")
 	check("Git", err == nil && gitVer.Code == 0, firstNonEmpty(gitVer.Stdout, "not found"))
@@ -308,13 +311,28 @@ func runDoctor(o Options) error {
 	}
 	check("Git identity", identOK, ident)
 
-	check("PATH", installer.IsInstalledOnPath(), pathDetail())
+	pathStatus := installer.GetPathStatus()
+	installDetail := pathStatus.InstallTarget
+	if installDetail == "" {
+		installDetail = "installation target unavailable"
+	}
+	if !pathStatus.InstalledBinary && pathStatus.InstallTarget != "" {
+		installDetail = "not installed (target: " + pathStatus.InstallTarget + ")"
+	}
+	check("GitMake install", pathStatus.InstalledBinary, installDetail)
+	check("CLI command", pathStatus.Healthy(), pathStatusDetail(pathStatus))
+	if pathStatus.InstalledBinary && pathStatus.UserPathHasInstall && !pathStatus.CommandAvailable && !pathStatus.CurrentIsInstalledCopy {
+		info("Current shell", "user PATH is registered; reopen the terminal to refresh command resolution")
+	}
+	if pathStatus.ResolvedPath != "" && pathStatus.InstallTarget != "" && !samePathForDisplay(pathStatus.ResolvedPath, pathStatus.InstallTarget) {
+		info("Resolved copy", pathStatus.ResolvedPath+" (different from the standard install target)")
+	}
 
 	cwd, _ := os.Getwd()
 	if _, err := os.Stat(filepath.Join(cwd, "gitmake.json")); err == nil {
 		check("Project config", true, filepath.Join(cwd, "gitmake.json"))
 	} else {
-		fmt.Printf("· %-16s %s\n", "Project config", "not present in this folder (optional)")
+		info("Project config", "not present in this folder (optional)")
 	}
 
 	fmt.Println()
@@ -329,20 +347,35 @@ func runDoctor(o Options) error {
 	if !identOK {
 		fmt.Println("Set: git config --global user.name ... and user.email ...")
 	}
-	if !installer.IsInstalledOnPath() {
+	if !pathStatus.Healthy() || !pathStatus.InstalledBinary {
 		fmt.Println("Install: gitmake install")
 	}
 	return fmt.Errorf("doctor found %d issue(s)", issues)
 }
 
-func pathDetail() string {
-	if installer.IsInstalledOnPath() {
-		return "gitmake command is available"
+func pathStatusDetail(s installer.PathStatus) string {
+	if s.ResolvedPath != "" {
+		return s.ResolvedPath
 	}
-	if d := installer.InstallDir(); d != "" {
-		return "not installed on PATH (target: " + d + ")"
+	if s.CurrentIsInstalledCopy && s.CurrentExecutable != "" {
+		return s.CurrentExecutable
+	}
+	if s.UserPathHasInstall && s.InstalledBinary {
+		return "registered in user PATH (restart the terminal if needed)"
+	}
+	if s.ProcessPathHasInstall && s.InstalledBinary {
+		return "install directory is present in the current process PATH"
+	}
+	if s.InstallDir != "" {
+		return "not registered for command use (target: " + s.InstallDir + ")"
 	}
 	return "not installed on PATH"
+}
+
+func samePathForDisplay(a, b string) bool {
+	a = strings.TrimRight(filepath.Clean(strings.TrimSpace(a)), `\\/`)
+	b = strings.TrimRight(filepath.Clean(strings.TrimSpace(b)), `\\/`)
+	return strings.EqualFold(a, b)
 }
 
 func firstNonEmpty(v, fallback string) string {

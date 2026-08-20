@@ -1,4 +1,4 @@
-GitMake v0.3.0 - QUICK START
+GitMake v0.3.1 - QUICK START
 ============================
 
 INSTALL (Windows)

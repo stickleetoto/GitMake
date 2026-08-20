@@ -1,22 +1,20 @@
-# GitMake v0.3.0
+# GitMake v0.3.1
 
-GitMake is now an installable Windows CLI instead of something you need to keep copying beside every project.
+This is a focused Windows installation/doctor reliability patch.
 
-## Highlights
+## Fixes
 
-- `GitMake-Setup.exe` and `gitmake install`
-- Per-user installation with no admin requirement
-- Automatic user PATH registration
-- `gitmake doctor` environment diagnostics
-- `gitmake Project.zip` explicit source selection
-- `gitmake init [Project.zip]`
-- Cleaner compact CREATE/UPDATE/Release output
-- Actionable dependency/auth/Git-identity errors
-- `gitmake upgrade` self-update flow from GitHub Releases
-- Existing snapshot mirroring, safe ZIP validation, dry-run, and Release automation retained
+- Fixes the false `PATH not installed` result that could appear even when `gitmake --version` already worked.
+- `gitmake doctor` now verifies four independent signals: installed binary, resolved command path, current-process PATH, and persisted user PATH.
+- Shows the actual resolved `gitmake.exe` path in diagnostics.
+- Correctly treats a freshly registered user PATH as healthy even if the current shell has not refreshed yet.
+- Adds a fallback manual PATH scan for Windows `PATHEXT` / `exec.LookPath` edge cases.
+- Running `gitmake install` from the already-installed copy no longer attempts to overwrite the executable currently in use.
 
-The normal workflow after installation is simply:
+## Validation
 
-```powershell
-gitmake
-```
+- Unit tests
+- Go vet
+- Race detector
+- Existing CREATE/UPDATE/Release E2E suite
+- Windows amd64 cross-build

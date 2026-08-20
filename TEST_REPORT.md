@@ -1,37 +1,77 @@
-# GitMake v0.3.0 Test Report
+# GitMake v0.3.1 Test Report
 
 Date: 2026-08-21
 
 ## Result
 
-**PASS for the v0.3.0 source and Windows x64 cross-build gates used in this environment.**
+**PASS** for all test/build gates available in this environment.
 
-## Automated checks
+## Regression target
+
+v0.3.1 specifically fixes the Windows doctor/install inconsistency where `gitmake --version` could resolve successfully while `gitmake doctor` still reported that GitMake was not installed on PATH.
+
+The new diagnostic model independently records:
+
+- installed binary at `%LOCALAPPDATA%\\Programs\\GitMake\\gitmake.exe`
+- actual `gitmake` command resolution
+- current-process PATH registration
+- persisted per-user PATH registration
+- whether the running executable is the standard installed copy
+
+Doctor treats a persisted user PATH registration as healthy even when the current shell has not refreshed yet, and manually scans PATH as a fallback when `exec.LookPath`/`PATHEXT` resolution disagrees.
+
+## Automated gates
 
 - `go test ./...` — PASS
 - `go vet ./...` — PASS
 - `go test -race ./...` — PASS
+- `scripts/e2e.sh` — `ALL_E2E_PASS`
 - `scripts/e2e_v03.sh` — `V03_E2E_PASS`
-- Windows x64 `gitmake.exe` cross-build — PASS
-- Windows x64 `GitMake-Setup.exe` cross-build — PASS
-- `file` verification — both binaries are PE32+ x86-64 Windows console executables
+- Windows amd64 cross-build — PASS
 
-## v0.3 focused E2E coverage
+## New regression tests
 
-The v0.3 harness uses real Git plus a fake `gh` adapter and validates:
+`internal/installer/status_test.go` covers:
 
-1. No-ZIP onboarding without writing a placeholder config.
-2. One-ZIP first run creates config and repository in one invocation.
-3. Existing-repository snapshot UPDATE preserves history.
-4. Change summary counts additions/modifications/deletions.
-5. No-change rerun does not create an empty commit.
-6. Multiple ZIP ambiguity refuses to guess and suggests explicit positional syntax.
-7. `gitmake Project.zip` disambiguates the source.
-8. `gitmake init` creates configuration without publishing.
-9. Configured GitHub Release creation and local asset upload.
+- case-insensitive Windows PATH matching
+- trailing-slash normalization
+- rejecting prefix-only PATH matches
+- healthy state when the installed binary is present and the persisted user PATH is registered even if live command resolution is temporarily unavailable
+- healthy state for resolved/process-PATH/current-installed-copy signals
+- unhealthy state for a binary that exists but has no command/PATH signal
 
-The existing unit suite additionally covers ZIP traversal/path safety, Windows-invalid archive names, case collisions, config validation/BOM behavior, Git branch/update logic, and snapshot mirroring.
+## Existing E2E coverage retained
 
-## Windows-specific note
+- first-run onboarding
+- CREATE from one ZIP
+- UPDATE with history preservation
+- no-change update
+- Unicode paths
+- ambiguous ZIP handling
+- positional ZIP selection
+- empty GitHub repository population
+- legacy `master` branch fallback
+- dry-run create/update
+- create-only/update-only guards
+- authentication failure
+- Windows-invalid ZIP rejection
+- case-colliding ZIP rejection
+- GitHub Release creation and asset upload
+- no-change Release creation
+- duplicate Release protection
+- `on_existing=skip`
 
-The binaries were cross-compiled for Windows from the available Linux build environment. `gitmake install`, PATH registration through Windows PowerShell, Setup execution, and the post-exit self-replacement used by `gitmake upgrade` cannot be executed natively in this environment; they are compile-validated and isolated behind Windows build-tag implementations. The portable publish/update path is also covered by the cross-platform E2E tests.
+## Windows limitation of this build environment
+
+The binaries are cross-compiled from Linux. Windows-specific registry/PATH mutation and PowerShell command resolution cannot be executed natively here. Those code paths are compile-validated, the decision logic is isolated into cross-platform unit tests, and the Windows executable format was verified after build.
+
+Recommended real-machine acceptance check after installing v0.3.1:
+
+```powershell
+gitmake --version
+gitmake doctor
+Get-Command gitmake | Format-List Source,Path,CommandType
+where.exe gitmake
+```
+
+Expected result: doctor reports both `GitMake install` and `CLI command` as healthy and exits with code 0.

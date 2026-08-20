@@ -1,8 +1,8 @@
-# GitMake v0.3.0
+# GitMake v0.3.1
 
 GitMake turns a project ZIP into a GitHub repository with one command. It creates the repository when it does not exist, mirrors later ZIP snapshots into the existing repository while preserving Git history, and can optionally publish GitHub Releases with assets.
 
-v0.3.0 adds an installable Windows CLI and a cleaner daily workflow:
+v0.3.1 keeps the installable Windows CLI and fixes/strengthens installation diagnostics:
 
 ```powershell
 gitmake
@@ -108,13 +108,14 @@ Common flags:
 Example healthy output:
 
 ```text
-GitMake Doctor · 0.3.0
+GitMake Doctor · 0.3.1
 
 ✓ Git              git version 2.x
 ✓ GitHub CLI       gh version 2.x
 ✓ GitHub login     your-user
 ✓ Git identity     Your Name <you@example.com>
-✓ PATH             gitmake command is available
+✓ GitMake install  C:\Users\<you>\AppData\Local\Programs\GitMake\gitmake.exe
+✓ CLI command      C:\Users\<you>\AppData\Local\Programs\GitMake\gitmake.exe
 
 Everything looks good.
 ```
@@ -189,7 +190,7 @@ GitMake downloads the matching `GitMake_vX.Y.Z_Windows_x64.zip`, stages the new 
 Normal operation intentionally avoids verbose step counters:
 
 ```text
-GitMake 0.3.0
+GitMake 0.3.1
 
   GitMake
   stickleetoto/GitMake · public

@@ -10,5 +10,6 @@ func InstallSelf() (string, bool, error) {
 func InstallSibling(string) (string, bool, error) {
 	return "", false, fmt.Errorf("GitMake Setup is currently supported on Windows only")
 }
-func IsInstalledOnPath() bool { return false }
-func InstallDir() string      { return "" }
+func GetPathStatus() PathStatus { return PathStatus{} }
+func IsInstalledOnPath() bool   { return false }
+func InstallDir() string        { return "" }
