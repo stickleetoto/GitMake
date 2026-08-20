@@ -1,25 +1,21 @@
-# GitMake v0.4.0
+# GitMake v0.5.0 — Agent Interface
 
-GitMake v0.4.0 focuses on first-run project setup UX.
+v0.5.0 makes GitMake directly discoverable and usable by AI coding agents while keeping the normal human CLI workflow unchanged.
 
 ## New
 
-- Interactive `gitmake init` wizard.
-- Automatic ZIP discovery when exactly one project ZIP is present.
-- Numbered ZIP selection when multiple archives are present.
-- Repository-name suggestion derived from the ZIP filename.
-- Visibility selection with safe `private` default.
-- Optional repository description and branch selection.
-- Final confirmation before writing `gitmake.json`.
-- `gitmake init --yes` for safe non-interactive defaults.
+- `gitmake ai describe --json` exposes a stable machine-readable capability manifest.
+- `gitmake ai install` adds a managed GitMake section to `AGENTS.md` and writes `.gitmake/ai.json`.
+- `--json` produces machine-readable command results.
+- `--read-only` provides a non-mutating agent mode.
+- `gitmake --dry-run --read-only --json` is now the recommended safe agent preview workflow.
+- Publish JSON includes pipeline state, repository mode, branch, file count, diff counts, Release metadata, and safety flags.
+- Stable exit codes are declared for agent/tool integrations.
 
-## UX / safety
+## Safety
 
-- `gitmake init` no longer writes placeholder configuration when there is no ZIP.
-- Cancelling setup leaves the directory unchanged.
-- Existing `gitmake.json` is never overwritten by normal `init`.
-- Daily publishing remains one command: `gitmake`.
+Read-only mode refuses project/config mutations and real GitHub publishing. GitMake continues to omit force-push, history rewriting, and repository deletion entirely.
 
-## Existing features retained
+## Existing behavior retained
 
-Repository create/update, snapshot mirroring, Release assets, `doctor`, per-user install, and self-upgrade remain supported.
+One-command ZIP publishing, automatic repository create/update, Git history preservation, GitHub Release assets, project setup, doctor, per-user installation, and self-upgrade remain supported.

@@ -1,53 +1,86 @@
-# GitMake v0.4.0 Test Report
+# GitMake v0.5.0 Test Report
 
 Date: 2026-08-21
 
-## Result
+## Summary
 
-PASS for the tested development environment and Windows cross-build.
+GitMake v0.5.0 Agent Interface passed unit, static, race, legacy E2E, new AI/JSON/read-only E2E, and Windows x64 cross-build validation.
 
-## Validation
+## Automated checks
 
-- `go test ./...` — PASS
-- `go vet ./...` — PASS
-- `go test -race ./...` — PASS
-- Base create/update/release E2E — `ALL_E2E_PASS`
-- v0.3 compatibility E2E — `V03_E2E_PASS`
-- v0.4 init UX E2E — `V04_E2E_PASS`
-- Windows amd64 `gitmake.exe` cross-build — PASS
-- Windows amd64 `GitMake-Setup.exe` cross-build — PASS
-- PE32+ x86-64 executable identification — PASS
+| Check | Result |
+|---|---|
+| `go test ./...` | PASS |
+| `go vet ./...` | PASS |
+| `go test -race ./...` | PASS |
+| Base create/update/release E2E | PASS (`ALL_E2E_PASS`) |
+| v0.3 install/CLI regression E2E | PASS (`V03_E2E_PASS`) |
+| v0.4 init UX regression E2E | PASS (`V04_E2E_PASS`) |
+| v0.5 Agent Interface E2E | PASS (`V05_E2E_PASS`) |
+| Windows amd64 `gitmake.exe` cross-build | PASS |
+| Windows amd64 `GitMake-Setup.exe` cross-build | PASS |
+| PE32+ x86-64 verification | PASS |
 
-## v0.4 setup cases covered
+## v0.5 Agent Interface coverage
 
-- one-ZIP interactive initialization
-- repository name suggestion from versioned ZIP filename
-- public/private visibility selection
-- optional description
-- default branch acceptance
-- final confirmation before writing config
-- multiple-ZIP numbered selection
-- `gitmake init --yes` safe defaults
-- no-ZIP init leaves no placeholder config
-- existing config is not overwritten
-- version/help surfaces updated to 0.4.0
+Validated:
 
-## Lightweight optimization audit
+- `gitmake ai describe --json` emits valid `gitmake.ai/v1` JSON.
+- AI manifest declares capabilities, safety boundaries, recommended workflow, and stable exit codes.
+- `gitmake ai install` preserves pre-existing `AGENTS.md` user content.
+- Re-running `gitmake ai install` is idempotent and maintains exactly one managed GitMake section.
+- `.gitmake/ai.json` is written as valid machine-readable capability metadata.
+- `--read-only` blocks `init`, `install`, `upgrade`, and `ai install` mutations.
+- Read-only publish without `--dry-run` is rejected.
+- Read-only dry-run refuses to create a missing `gitmake.json`.
+- Read-only source resolution refuses to auto-repair stale `source.zip` and leaves config bytes unchanged.
+- `--version --json` emits the stable `gitmake.version/v1` schema.
+- Generic `--json` output emits the stable `gitmake.result/v1` envelope.
+- AI-safe publish preview (`--dry-run --read-only --json`) returns structured repository mode, target, file count, diff counts, safety flags, and final pipeline stage without GitHub mutation.
 
-Optimization is not currently a release blocker.
+## Legacy regression coverage retained
 
-Measured on the Linux development container (not a Windows performance guarantee):
+The base/v0.3/v0.4 suites still cover:
 
-- stripped Windows x64 `gitmake.exe`: about 2.9 MiB
-- stripped Windows x64 Setup: about 1.8 MiB
-- local process startup (`--version`, 100 runs): median ~0.8 ms, p95 ~1.1 ms
-- synthetic 5,000-file / 1 KiB-per-file ZIP: safe extraction ~120 ms
-- mirror of the same 5,000 files: ~94 ms
+- CREATE and UPDATE repository flows.
+- Git history preservation.
+- Snapshot add/modify/delete mirroring.
+- no-change updates without empty commits.
+- Unicode paths.
+- ambiguous/missing ZIP handling.
+- empty remote repositories.
+- non-`main` default-branch fallback.
+- dry-run create/update.
+- create-only/update-only guards.
+- authentication errors.
+- Windows-invalid ZIP paths and case collisions.
+- GitHub Release creation, assets, duplicate handling, no-change Releases, missing assets, and `--no-release`.
+- interactive/non-interactive `gitmake init` behavior.
 
-These local costs are small compared with the normal external work performed by GitMake (`git`, `gh`, cloning, pushing, and network round trips). The main future optimization candidate is snapshot mirroring: updates currently replace the working-tree snapshot before Git computes the diff, which is simple and reliable but causes avoidable disk I/O for very large repositories.
+## Windows build artifacts
 
-Recommendation: keep v0.4 focused on UX and correctness. Only introduce differential-copy/hash caching after a benchmark demonstrates that large projects make local snapshot mirroring a meaningful part of total publish time.
+Cross-compiled with:
+
+```text
+GOOS=windows
+GOARCH=amd64
+CGO_ENABLED=0
+```
+
+Verified file type:
+
+```text
+gitmake.exe       PE32+ executable, x86-64
+GitMake-Setup.exe PE32+ executable, x86-64
+```
+
+Binary SHA-256 at build time:
+
+```text
+14a3c79d0734e88ce0589bc36788dda5d3cc2c266f515f291e3f81865fa8f25e  gitmake.exe
+df678bbb6301770d9ca5fd57010e06b4b747872632837023a87707cead90ab8a  GitMake-Setup.exe
+```
 
 ## Platform note
 
-Windows binaries were cross-compiled and structurally validated in the development environment. The v0.3.1 install/PATH/upgrade path was previously confirmed on a real Windows machine; v0.4 changes are concentrated in project initialization and do not replace that installer layer.
+The Linux CI/container environment can execute the portable Go logic and E2E harnesses, but cannot directly exercise Windows Explorer launch behavior, Windows registry/PATH mutation, or in-place executable replacement. Those Windows-specific mechanisms are unchanged from the v0.3.1 line that was previously validated on a real Windows host; v0.5.0's new Agent Interface logic is platform-neutral and covered by automated tests.

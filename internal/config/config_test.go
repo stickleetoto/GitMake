@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -150,5 +151,31 @@ func TestReleaseRejectsNoNotesWhenGenerationDisabled(t *testing.T) {
 	}
 	if _, err := Load(p); err == nil {
 		t.Fatal("expected non-interactive release validation to fail")
+	}
+}
+
+func TestResolveProjectZIPReadOnlyDoesNotRepairConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "gitmake.json")
+	strip := true
+	cfg := Config{
+		SchemaVersion: CurrentSchemaVersion,
+		Repo:          RepoConfig{Name: "Demo", Visibility: "private"},
+		Source:        SourceConfig{ZIP: "missing.zip", StripRoot: &strip},
+		Git:           GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"},
+	}
+	if err := Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "actual.zip"), []byte("not important"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(configPath)
+	if _, err := ResolveProjectZIPReadOnly(configPath, cfg); err == nil || !strings.Contains(err.Error(), "will not repair") {
+		t.Fatalf("expected read-only repair refusal, got %v", err)
+	}
+	after, _ := os.ReadFile(configPath)
+	if string(before) != string(after) {
+		t.Fatal("read-only resolver modified config")
 	}
 }

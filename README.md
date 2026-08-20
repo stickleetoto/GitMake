@@ -1,16 +1,32 @@
-# GitMake v0.4.0
+# GitMake v0.5.0
 
-GitMake turns a project ZIP into a GitHub repository with one command. It creates the repository when it does not exist, mirrors later ZIP snapshots into the existing repository while preserving Git history, and can optionally publish GitHub Releases with assets.
+GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command.
 
-v0.4.0 keeps the one-command publish flow and adds a clean interactive project setup wizard:
+v0.5.0 adds the **Agent Interface**: machine-readable output, built-in AI capability discovery, repository-local AI instructions, and a read-only preview mode for agents.
 
 ```powershell
 gitmake
 ```
 
-## Install on Windows
+## What GitMake owns
 
-### Easiest
+GitMake intentionally handles a small workflow well:
+
+```text
+project ZIP
+   ↓
+validate snapshot
+   ↓
+create/update GitHub repository
+   ↓
+commit + push
+   ↓
+optional GitHub Release + assets
+```
+
+It does not try to replace GitHub CLI, Git, pull requests, issues, Actions, or general repository administration.
+
+## Install on Windows
 
 Unzip the Windows package and double-click:
 
@@ -18,75 +34,197 @@ Unzip the Windows package and double-click:
 GitMake-Setup.exe
 ```
 
-The setup program copies `gitmake.exe` to:
+The setup program installs `gitmake.exe` to:
 
 ```text
 %LOCALAPPDATA%\Programs\GitMake\gitmake.exe
 ```
 
-and adds that directory to the current user's PATH. No administrator permission is required. Open a new PowerShell/Terminal window after installation.
+and registers the directory in the current user's PATH without requiring administrator privileges.
 
-### From the portable binary
+You can also install from the portable binary:
 
 ```powershell
 .\gitmake.exe install
 ```
 
-Then verify the environment:
+Then open a new terminal and verify:
 
 ```powershell
+gitmake --version
 gitmake doctor
 ```
 
 ## Requirements
 
-GitMake intentionally delegates Git/GitHub authentication to the standard tools:
-
 - Git available as `git`
 - GitHub CLI available as `gh`
-- GitHub login: `gh auth login`
-- Git commit identity (`user.name` and `user.email`)
+- GitHub login completed with `gh auth login`
+- Git `user.name` and `user.email` configured
 
 GitMake itself is a single native executable and does not require Go at runtime.
 
 ## Daily workflow
 
-Put a project ZIP in a folder:
-
-```text
-ContextDiet-release/
-└─ ContextDiet_v0.4.0.zip
-```
-
-Open a terminal in that folder and run:
+Put one project ZIP in a folder and run:
 
 ```powershell
 gitmake
 ```
 
-With one ZIP and no config, GitMake automatically creates `gitmake.json`, derives the repository name, validates the ZIP, and continues in the same run.
+If `gitmake.json` is missing and there is exactly one ZIP, GitMake creates a safe starter configuration and continues in the same invocation.
 
-Later, replace the ZIP contents/version and run `gitmake` again. If the GitHub repository already exists, GitMake clones it, preserves `.git`, mirrors the ZIP snapshot, commits only real changes, and pushes.
-
-### Explicit ZIP
-
-If multiple ZIP files are present, select the source directly:
+For explicit setup:
 
 ```powershell
-gitmake ContextDiet_v0.4.0_Source.zip
+gitmake init
 ```
 
-GitMake never guesses when multiple ZIPs are ambiguous.
+For a specific ZIP:
+
+```powershell
+gitmake Project_v1.2.3.zip
+```
+
+## Agent Interface
+
+### Discover GitMake from an AI agent
+
+```powershell
+gitmake ai describe --json
+```
+
+This returns a stable manifest (`gitmake.ai/v1`) describing GitMake's purpose, commands, capabilities, safety boundaries, recommended agent workflow, and exit codes.
+
+Example shape:
+
+```json
+{
+  "schema": "gitmake.ai/v1",
+  "name": "gitmake",
+  "version": "0.5.0",
+  "purpose": "...",
+  "commands": {
+    "preview": {
+      "command": "gitmake --dry-run --read-only --json"
+    },
+    "publish": {
+      "command": "gitmake --json"
+    }
+  },
+  "safety": {
+    "force_push": false,
+    "rewrite_history": false,
+    "delete_repositories": false
+  }
+}
+```
+
+Human-readable discovery is also available:
+
+```powershell
+gitmake ai describe
+```
+
+### Install repository-local AI instructions
+
+Run inside a project:
+
+```powershell
+gitmake ai install
+```
+
+GitMake creates/updates only its managed section in:
+
+```text
+AGENTS.md
+```
+
+and writes the full machine-readable manifest to:
+
+```text
+.gitmake/ai.json
+```
+
+Existing user-authored `AGENTS.md` content is preserved. Re-running the command is idempotent.
+
+### Safe AI preview
+
+For an AI that should inspect the publish plan but not mutate the project or GitHub:
+
+```powershell
+gitmake --dry-run --read-only --json
+```
+
+`--read-only` blocks `init`, `install`, `upgrade`, `ai install`, and any real publish. A publish in read-only mode is only allowed together with `--dry-run` and an already existing `gitmake.json`.
+
+## JSON output
+
+Use `--json` on normal commands:
+
+```powershell
+gitmake --json
+gitmake doctor --json
+gitmake help --json
+gitmake --version --json
+```
+
+Publish results use `gitmake.result/v1` and include a structured pipeline summary:
+
+```json
+{
+  "schema": "gitmake.result/v1",
+  "ok": true,
+  "version": "0.5.0",
+  "command": "publish",
+  "exit_code": 0,
+  "pipeline": {
+    "stage": "REPORT",
+    "mode": "UPDATE",
+    "repository": "owner/project",
+    "branch": "main",
+    "files": 37,
+    "changes": {
+      "added": 2,
+      "modified": 4,
+      "deleted": 1
+    },
+    "dry_run": true,
+    "read_only": true
+  }
+}
+```
+
+Human console output remains the default when `--json` is not supplied.
+
+## Pipeline stages
+
+The Agent Interface exposes a stable high-level execution model:
+
+```text
+DISCOVER
+→ PLAN
+→ PREPARE
+→ VALIDATE
+→ GIT
+→ PUSH
+→ RELEASE
+→ REPORT
+```
+
+Some stages are skipped when they are not applicable, such as `PUSH` during a dry run.
 
 ## CLI
 
 ```text
 gitmake                     Publish/update current project
 gitmake Project.zip         Publish using a specific source ZIP
-gitmake init [Project.zip]  Interactive project setup / create gitmake.json
-gitmake doctor              Check Git, gh, login, identity, and PATH
+gitmake init [Project.zip]  Create gitmake.json
+gitmake doctor              Diagnose Git/GitHub/install state
 gitmake install             Install GitMake for the current Windows user
-gitmake upgrade             Upgrade from the latest GitMake GitHub Release
+gitmake upgrade             Upgrade from the latest GitMake Release
+gitmake ai describe         Describe capabilities to AI agents
+gitmake ai install          Install repository-local AI guidance
 gitmake help                Show help
 ```
 
@@ -94,83 +232,31 @@ Common flags:
 
 ```text
 --dry-run       Preview without modifying GitHub
---no-release    Skip configured GitHub Release creation
+--read-only     Block mutations; use with --dry-run for agent previews
+--json          Emit machine-readable JSON
+--no-release    Skip configured Release creation
 --verbose       Print external git/gh commands
---yes           Accept safe init defaults without prompting
---keep-temp     Keep the temporary workspace for debugging
+--yes           Accept safe init defaults
+--keep-temp     Keep temporary workspace for debugging
 --create-only   Refuse to update an existing repository
 --update-only   Refuse to create a missing repository
 --config PATH   Use another JSON config
---version       Print version
+--version       Print GitMake version
 ```
 
-
-## Project setup wizard
-
-For explicit first-time setup, run:
-
-```powershell
-gitmake init
-```
-
-With one ZIP, GitMake detects it automatically. With multiple ZIPs, it shows a numbered selector. The wizard then asks only for values that are useful to humans:
+## Exit codes
 
 ```text
-GitMake setup · 0.4.0
-
-✓ Source      ContextDiet_v1.2.3.zip
-
-Repository name [ContextDiet]:
-Visibility
-  1) Private
-  2) Public
-  3) Internal
-Select [1]: 2
-Description (optional): File context optimizer
-Default branch [main]:
-
-  Repository  ContextDiet · public
-  Branch      main
-  Description File context optimizer
-
-Create gitmake.json? [Y/n]: y
-
-✓ Repository  ContextDiet · public
-✓ Config      ...\gitmake.json
-
-Ready. Run `gitmake` to publish.
+0  success
+1  runtime/environment/workflow error
+2  CLI usage error
 ```
 
-For scripts or users who want safe defaults without prompts:
-
-```powershell
-gitmake init --yes
-```
-
-`private` and `main` remain the safe defaults. If no ZIP exists, `init` only explains what to do and does not leave a placeholder config behind.
-
-## `gitmake doctor`
-
-Example healthy output:
-
-```text
-GitMake Doctor · 0.4.0
-
-✓ Git              git version 2.x
-✓ GitHub CLI       gh version 2.x
-✓ GitHub login     your-user
-✓ Git identity     Your Name <you@example.com>
-✓ GitMake install  C:\Users\<you>\AppData\Local\Programs\GitMake\gitmake.exe
-✓ CLI command      C:\Users\<you>\AppData\Local\Programs\GitMake\gitmake.exe
-
-Everything looks good.
-```
-
-When a dependency is missing, GitMake's normal error output also points to `gitmake doctor` and the relevant fix.
+These exit codes are also declared by `gitmake ai describe --json`.
 
 ## Configuration
 
-A minimal generated configuration looks like:
+Minimal example:
 
 ```json
 {
@@ -180,7 +266,7 @@ A minimal generated configuration looks like:
     "visibility": "private"
   },
   "source": {
-    "zip": "ContextDiet_v0.4.0.zip",
+    "zip": "ContextDiet_v1.0.0.zip",
     "strip_root": true
   },
   "git": {
@@ -191,107 +277,44 @@ A minimal generated configuration looks like:
 }
 ```
 
-To make a repository public, change:
-
-```json
-"visibility": "public"
-```
-
-## Automatic GitHub Releases
-
-Add a release block:
+Optional GitHub Release:
 
 ```json
 {
   "release": {
     "enabled": true,
-    "tag": "v0.4.0",
-    "title": "ContextDiet v0.4.0",
+    "tag": "v1.0.0",
+    "title": "ContextDiet v1.0.0",
     "generate_notes": true,
     "assets": [
-      "ContextDiet_v0.4.0_Windows_x64.zip",
-      "ContextDiet_v0.4.0_Source.zip"
+      "ContextDiet_v1.0.0_Windows_x64.zip",
+      "ContextDiet_v1.0.0_Source.zip"
     ],
     "on_existing": "error"
   }
 }
 ```
 
-A normal run then performs repository create/update first and Release publication second. Release assets and release-note files are validated before repository mutation.
-
-`on_existing` can be `error` (safe default) or `skip`.
-
-## Upgrade
-
-Installed or portable Windows builds can ask the public GitMake repository for the latest Release:
-
-```powershell
-gitmake upgrade
-```
-
-GitMake downloads the matching `GitMake_vX.Y.Z_Windows_x64.zip`, stages the new executable, exits, and lets a small replacement helper swap the executable after the running process releases the file.
-
-## Clean output
-
-Normal operation intentionally avoids verbose step counters:
-
-```text
-GitMake 0.4.0
-
-  GitMake
-  stickleetoto/GitMake · public
-
-✓ Source validated      34 files
-✓ Repository updated    +3 ~7 -1
-✓ Pushed                main
-✓ Released              v0.3.0 · 2 assets
-  https://github.com/stickleetoto/GitMake/releases/tag/v0.3.0
-
-Done in 2.8s
-```
-
-Use `--verbose` only when the underlying external commands are needed for debugging.
-
-## Snapshot semantics
-
-The source ZIP is authoritative for repository working-tree files:
-
-```text
-existing repository clone
-        ↓
-preserve .git
-        ↓
-mirror ZIP snapshot
-        ↓
-git add -A
-        ↓
-commit only if changed
-        ↓
-push
-```
-
-Files removed from a new ZIP are therefore removed in the new repository commit instead of lingering forever.
-
 ## Safety
 
-GitMake deliberately does **not** implement repository deletion, force push, history rewriting, Release deletion, or destructive remote cleanup.
+GitMake deliberately does not provide:
 
-ZIP validation rejects path traversal, absolute paths, `.git`, symlinks/special files, Windows reserved names, Windows-invalid paths, case-collisions, file/directory conflicts, invalid UTF-8 names, excessive entry counts, and oversized extracted content.
+- force push
+- Git history rewriting
+- repository deletion
 
-Source archives are processed in temporary workspaces. Git history is preserved on updates.
+ZIP extraction also rejects path traversal, embedded `.git`, symlinks, Windows-invalid names, case-colliding paths, and extraction-limit violations.
 
-## Build
+## Build from source
 
 ```powershell
-.\build.ps1
-```
-
-or:
-
-```text
 go test ./...
 go vet ./...
-go build -o gitmake.exe ./cmd/gitmake
+go build ./cmd/gitmake
 ```
 
-The Windows build scripts create both `gitmake.exe` and `GitMake-Setup.exe`.
+Windows build helpers are included as `build.ps1` and `build.bat`.
+
+## License
+
+MIT. See `LICENSE`.

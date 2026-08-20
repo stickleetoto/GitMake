@@ -1,4 +1,4 @@
-GitMake v0.4.0 - QUICK START
+GitMake v0.5.0 - QUICK START
 
 INSTALL
 1. Unzip the Windows x64 package.
@@ -14,10 +14,17 @@ FIRST PROJECT SETUP
 5. Run: gitmake
 
 FAST PATH
-With one ZIP and no config, plain `gitmake` can still auto-create a private config and publish immediately.
+With one ZIP and no config, plain `gitmake` can auto-create a private config and publish immediately.
 
 DAILY USE
   gitmake
+
+AI / AGENT USE
+  gitmake ai describe --json
+  gitmake ai install
+  gitmake doctor --json
+  gitmake --dry-run --read-only --json
+  gitmake --json
 
 USEFUL COMMANDS
   gitmake init

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -20,7 +21,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.4.0"
+const Version = "0.5.0"
 
 type Options struct {
 	Command     string
@@ -34,23 +35,67 @@ type Options struct {
 	NoRelease   bool
 	VersionOnly bool
 	Yes         bool
+	JSON        bool
+	ReadOnly    bool
+	State       *PipelineState
 }
 
 func Main(args []string) int {
+	jsonRequested := hasArg(args, "--json")
 	opts, err := parseArgs(args)
 	if err != nil {
-		printFriendlyError(err)
+		if jsonRequested {
+			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: "unknown", ExitCode: 2, Error: &MachineError{Kind: "usage_error", Message: err.Error()}})
+		} else {
+			printFriendlyError(err)
+		}
 		return 2
 	}
 	if opts.VersionOnly {
-		fmt.Println("gitmake", Version)
+		if opts.JSON {
+			_ = emitJSON(map[string]any{"schema": "gitmake.version/v1", "name": "gitmake", "version": Version})
+		} else {
+			fmt.Println("gitmake", Version)
+		}
 		return 0
 	}
+
+	// AI subcommands own their JSON schema because agents consume these files
+	// directly as capability/installation metadata.
+	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install") {
+		if err := Run(opts); err != nil {
+			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: &MachineError{Kind: "runtime_error", Message: err.Error()}})
+			return 1
+		}
+		return 0
+	}
+
+	if opts.JSON {
+		opts.State = newPipeline(opts)
+		output, runErr := captureOutput(func() error { return Run(opts) })
+		result := MachineResult{Schema: "gitmake.result/v1", OK: runErr == nil, Version: Version, Command: opts.Command, ExitCode: 0, Pipeline: opts.State, Output: output}
+		if runErr != nil {
+			result.ExitCode = 1
+			result.Error = &MachineError{Kind: "runtime_error", Message: runErr.Error()}
+		}
+		_ = emitJSON(result)
+		return result.ExitCode
+	}
+
 	if err := Run(opts); err != nil {
 		printFriendlyError(err)
 		return 1
 	}
 	return 0
+}
+
+func hasArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func printFriendlyError(err error) {
@@ -78,15 +123,34 @@ func parseArgs(args []string) (Options, error) {
 	var o Options
 	o.Command = "publish"
 	if len(args) > 0 {
-		switch args[0] {
-		case "init", "doctor", "install", "upgrade", "help":
-			o.Command = args[0]
-			args = args[1:]
+		if args[0] == "ai" {
+			if len(args) < 2 {
+				return Options{}, errors.New("usage: gitmake ai <describe|install>")
+			}
+			switch args[1] {
+			case "describe":
+				o.Command = "ai-describe"
+			case "install":
+				o.Command = "ai-install"
+			default:
+				return Options{}, fmt.Errorf("unknown AI command %q (expected describe or install)", args[1])
+			}
+			args = args[2:]
+		} else {
+			switch args[0] {
+			case "init", "doctor", "install", "upgrade", "help":
+				o.Command = args[0]
+				args = args[1:]
+			}
 		}
 	}
 
 	fs := flag.NewFlagSet("gitmake", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
+	if hasArg(args, "--json") {
+		fs.SetOutput(io.Discard)
+	} else {
+		fs.SetOutput(os.Stderr)
+	}
 	fs.StringVar(&o.ConfigPath, "config", "gitmake.json", "path to gitmake JSON config")
 	fs.BoolVar(&o.DryRun, "dry-run", false, "show changes without creating, committing, pushing, or releasing")
 	fs.BoolVar(&o.Verbose, "verbose", false, "print external commands")
@@ -96,6 +160,8 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.NoRelease, "no-release", false, "skip release creation even when release.enabled is true")
 	fs.BoolVar(&o.VersionOnly, "version", false, "print version")
 	fs.BoolVar(&o.Yes, "yes", false, "accept safe setup defaults without prompting")
+	fs.BoolVar(&o.JSON, "json", false, "emit machine-readable JSON output")
+	fs.BoolVar(&o.ReadOnly, "read-only", false, "block local/GitHub mutations; publish requires --dry-run and an existing config")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
@@ -119,7 +185,7 @@ func parseArgs(args []string) (Options, error) {
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
 		}
-	case "doctor", "install", "upgrade", "help":
+	case "doctor", "install", "upgrade", "help", "ai-describe", "ai-install":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
 		}
@@ -128,6 +194,16 @@ func parseArgs(args []string) (Options, error) {
 }
 
 func Run(o Options) error {
+	if o.ReadOnly {
+		switch o.Command {
+		case "install", "upgrade", "init", "ai-install":
+			return fmt.Errorf("read-only mode blocks `gitmake %s`", strings.ReplaceAll(o.Command, "ai-", "ai "))
+		case "publish":
+			if !o.DryRun {
+				return errors.New("read-only publish requires --dry-run")
+			}
+		}
+	}
 	switch o.Command {
 	case "help":
 		printHelp()
@@ -140,6 +216,10 @@ func Run(o Options) error {
 		return runUpgrade(o)
 	case "init":
 		return runInit(o)
+	case "ai-describe":
+		return runAIDescribe(o)
+	case "ai-install":
+		return runAIInstall(o)
 	default:
 		return runPublish(o)
 	}
@@ -155,12 +235,16 @@ Usage:
   gitmake doctor              Check Git, GitHub CLI, login, identity, and PATH
   gitmake install             Install GitMake for the current Windows user
   gitmake upgrade             Upgrade GitMake from its latest GitHub Release
+  gitmake ai describe         Explain GitMake capabilities to AI agents
+  gitmake ai install          Install managed AGENTS.md + .gitmake/ai.json guidance
 
 Common options:
   --dry-run       Preview without changing GitHub
   --no-release    Skip the configured Release for this run
   --verbose       Show external commands
   --yes           Accept safe setup defaults (mainly for gitmake init)
+  --json          Emit machine-readable JSON
+  --read-only     Block mutations; combine with --dry-run for safe AI previews
   --version       Print GitMake version
 
 Safety:
@@ -393,11 +477,21 @@ func firstLine(v string) string {
 
 func runPublish(o Options) error {
 	started := time.Now()
+	if o.State != nil {
+		o.State.enter("DISCOVER")
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
 	configPath := resolveConfigPath(cwd, o.ConfigPath)
+	if o.ReadOnly {
+		if _, err := os.Stat(configPath); os.IsNotExist(err) {
+			return fmt.Errorf("read-only mode will not create %s; run `gitmake init` first", configPath)
+		} else if err != nil {
+			return fmt.Errorf("check config: %w", err)
+		}
+	}
 
 	// Positional ZIP gives an unambiguous source. If no config exists, create
 	// one beside the current project automatically. If a config does exist,
@@ -446,10 +540,19 @@ func runPublish(o Options) error {
 	zipPath := explicitZip
 	repaired := false
 	if zipPath == "" {
-		zipPath, repaired, err = config.ResolveProjectZIP(configPath, &cfg)
+		if o.ReadOnly {
+			zipPath, err = config.ResolveProjectZIPReadOnly(configPath, cfg)
+		} else {
+			zipPath, repaired, err = config.ResolveProjectZIP(configPath, &cfg)
+		}
 		if err != nil {
 			return err
 		}
+	}
+	if o.State != nil {
+		o.State.Source = filepath.Base(zipPath)
+		o.State.Visibility = cfg.Repo.Visibility
+		o.State.enter("PLAN")
 	}
 
 	run := runner.Runner{Verbose: o.Verbose}
@@ -474,6 +577,14 @@ func runPublish(o Options) error {
 	if err != nil {
 		return err
 	}
+	if o.State != nil {
+		o.State.Repository = target
+		if exists {
+			o.State.Mode = "UPDATE"
+		} else {
+			o.State.Mode = "CREATE"
+		}
+	}
 	if exists && o.CreateOnly {
 		return fmt.Errorf("repository %s already exists (--create-only)", target)
 	}
@@ -485,6 +596,12 @@ func runPublish(o Options) error {
 	if err != nil {
 		return err
 	}
+	if o.State != nil {
+		o.State.Release = &ReleaseState{Enabled: release.enabled, Tag: release.spec.Tag, Assets: len(release.spec.Assets), Skipped: release.skipExisting || !release.enabled}
+		if release.existingURL != "" {
+			o.State.Release.URL = release.existingURL
+		}
+	}
 
 	fmt.Printf("GitMake %s\n\n", Version)
 	fmt.Printf("  %s\n", cfg.Repo.Name)
@@ -493,6 +610,9 @@ func runPublish(o Options) error {
 		fmt.Printf("✓ Source selected       %s\n", filepath.Base(zipPath))
 	}
 
+	if o.State != nil {
+		o.State.enter("PREPARE")
+	}
 	work, err := os.MkdirTemp("", "gitmake-*")
 	if err != nil {
 		return err
@@ -510,6 +630,10 @@ func runPublish(o Options) error {
 	if files == 0 {
 		return fmt.Errorf("source ZIP contains no regular files")
 	}
+	if o.State != nil {
+		o.State.Files = files
+		o.State.enter("VALIDATE")
+	}
 	fmt.Printf("✓ Source validated      %d files\n", files)
 
 	if exists {
@@ -526,6 +650,10 @@ func runPublish(o Options) error {
 }
 
 func createFlow(o Options, cfg config.Config, target, snapshot string, git gitops.Client, gh github.Client, release releasePlan) error {
+	if o.State != nil {
+		o.State.enter("GIT")
+		o.State.Branch = cfg.Git.Branch
+	}
 	if err := git.Init(snapshot, cfg.Git.Branch); err != nil {
 		return err
 	}
@@ -544,17 +672,30 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 		return err
 	}
 	added, modified, deleted := diffCounts(diff)
+	if o.State != nil {
+		o.State.Changes = &ChangeCounts{Added: added, Modified: modified, Deleted: deleted}
+	}
 
 	if o.DryRun {
 		fmt.Printf("✓ Repository plan       CREATE · +%d ~%d -%d\n", added, modified, deleted)
 		fmt.Println("· Dry run               GitHub will not be changed")
-		return finishRelease(release, target, cfg.Git.Branch, true, gh)
+		if o.State != nil {
+			o.State.enter("RELEASE")
+		}
+		err := finishRelease(release, target, cfg.Git.Branch, true, gh)
+		if o.State != nil {
+			o.State.enter("REPORT")
+		}
+		return err
 	}
 	if err := git.EnsureIdentity(snapshot); err != nil {
 		return err
 	}
 	if err := git.Commit(snapshot, cfg.Git.InitialCommitMessage); err != nil {
 		return err
+	}
+	if o.State != nil {
+		o.State.enter("PUSH")
 	}
 	url, err := gh.CreateAndPush(target, cfg.Repo.Visibility, cfg.Repo.Description, snapshot)
 	if err != nil {
@@ -564,11 +705,27 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	fmt.Printf("✓ Pushed                %s\n", cfg.Git.Branch)
 	if url != "" {
 		fmt.Println("  " + url)
+		if o.State != nil {
+			o.State.RepositoryURL = url
+		}
 	}
-	return finishRelease(release, target, cfg.Git.Branch, false, gh)
+	if o.State != nil {
+		o.State.enter("RELEASE")
+	}
+	err = finishRelease(release, target, cfg.Git.Branch, false, gh)
+	if o.State != nil {
+		if o.State.Release != nil && release.enabled && !release.skipExisting && err == nil {
+			o.State.Release.Created = true
+		}
+		o.State.enter("REPORT")
+	}
+	return err
 }
 
 func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch, snapshot, work string, git gitops.Client, gh github.Client, release releasePlan) error {
+	if o.State != nil {
+		o.State.enter("GIT")
+	}
 	repoDir := filepath.Join(work, "repo")
 	if err := gh.Clone(target, repoDir); err != nil {
 		return err
@@ -576,6 +733,9 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	branch, fallback, err := git.PrepareUpdateBranch(repoDir, cfg.Git.Branch, repoDefaultBranch)
 	if err != nil {
 		return err
+	}
+	if o.State != nil {
+		o.State.Branch = branch
 	}
 	if fallback {
 		fmt.Printf("· Branch fallback       %s → %s\n", cfg.Git.Branch, branch)
@@ -594,27 +754,57 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		fmt.Println("✓ Repository            already up to date")
 		if repoURL != "" {
 			fmt.Println("  " + repoURL)
+			if o.State != nil {
+				o.State.RepositoryURL = repoURL
+			}
 		}
-		return finishRelease(release, target, branch, o.DryRun, gh)
+		if o.State != nil {
+			o.State.Changes = &ChangeCounts{}
+			o.State.enter("RELEASE")
+		}
+		err := finishRelease(release, target, branch, o.DryRun, gh)
+		if o.State != nil {
+			if o.State.Release != nil && release.enabled && !release.skipExisting && !o.DryRun && err == nil {
+				o.State.Release.Created = true
+			}
+			o.State.enter("REPORT")
+		}
+		return err
 	}
 	diff, err := git.NameStatus(repoDir)
 	if err != nil {
 		return err
 	}
 	added, modified, deleted := diffCounts(diff)
+	if o.State != nil {
+		o.State.Changes = &ChangeCounts{Added: added, Modified: modified, Deleted: deleted}
+	}
 	if o.DryRun {
 		fmt.Printf("✓ Repository plan       UPDATE · +%d ~%d -%d\n", added, modified, deleted)
 		fmt.Println("· Dry run               no commit or push")
 		if repoURL != "" {
 			fmt.Println("  " + repoURL)
+			if o.State != nil {
+				o.State.RepositoryURL = repoURL
+			}
 		}
-		return finishRelease(release, target, branch, true, gh)
+		if o.State != nil {
+			o.State.enter("RELEASE")
+		}
+		err := finishRelease(release, target, branch, true, gh)
+		if o.State != nil {
+			o.State.enter("REPORT")
+		}
+		return err
 	}
 	if err := git.EnsureIdentity(repoDir); err != nil {
 		return err
 	}
 	if err := git.Commit(repoDir, cfg.Git.CommitMessage); err != nil {
 		return err
+	}
+	if o.State != nil {
+		o.State.enter("PUSH")
 	}
 	if err := git.Push(repoDir, branch); err != nil {
 		return err
@@ -623,8 +813,21 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	fmt.Printf("✓ Pushed                %s\n", branch)
 	if repoURL != "" {
 		fmt.Println("  " + repoURL)
+		if o.State != nil {
+			o.State.RepositoryURL = repoURL
+		}
 	}
-	return finishRelease(release, target, branch, false, gh)
+	if o.State != nil {
+		o.State.enter("RELEASE")
+	}
+	err = finishRelease(release, target, branch, false, gh)
+	if o.State != nil {
+		if o.State.Release != nil && release.enabled && !release.skipExisting && err == nil {
+			o.State.Release.Created = true
+		}
+		o.State.enter("REPORT")
+	}
+	return err
 }
 
 func diffCounts(diff string) (added, modified, deleted int) {

@@ -424,3 +424,26 @@ func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
 	}
 	return cfg, nil
 }
+
+// ResolveProjectZIPReadOnly resolves source.zip without repairing or rewriting
+// gitmake.json. It is used by agent/read-only previews so inspection never
+// mutates the user's project configuration.
+func ResolveProjectZIPReadOnly(configPath string, c Config) (string, error) {
+	base := filepath.Dir(configPath)
+	candidate := c.Source.ZIP
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(base, candidate)
+	}
+	candidate = filepath.Clean(candidate)
+	info, err := os.Stat(candidate)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("configured source ZIP %q was not found; read-only mode will not repair gitmake.json", c.Source.ZIP)
+		}
+		return "", fmt.Errorf("source ZIP: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("source.zip points to a directory: %s", candidate)
+	}
+	return candidate, nil
+}
