@@ -1,33 +1,28 @@
-GitMake v0.3.1 - QUICK START
-============================
+GitMake v0.4.0 - QUICK START
 
-INSTALL (Windows)
-1. Run GitMake-Setup.exe.
-2. Open a NEW PowerShell/Terminal window.
-3. Run: gitmake doctor
+INSTALL
+1. Unzip the Windows x64 package.
+2. Double-click GitMake-Setup.exe.
+3. Open a new PowerShell window.
+4. Run: gitmake doctor
 
-FIRST PROJECT
-1. Put one project .zip in a folder.
-2. Open a terminal in that folder.
-3. Run: gitmake
+FIRST PROJECT SETUP
+1. Put your project ZIP in a folder.
+2. Open PowerShell in that folder.
+3. Run: gitmake init
+4. Accept/edit the suggested repository settings.
+5. Run: gitmake
 
-MULTIPLE ZIP FILES
-Run: gitmake YourProject_Source.zip
+FAST PATH
+With one ZIP and no config, plain `gitmake` can still auto-create a private config and publish immediately.
 
-CONFIG ONLY
-Run: gitmake init YourProject.zip
+DAILY USE
+  gitmake
 
-PREVIEW
-Run: gitmake --dry-run
-
-SKIP A CONFIGURED RELEASE
-Run: gitmake --no-release
-
-UPDATE GITMAKE ITSELF
-Run: gitmake upgrade
-
-DEBUG
-Run: gitmake doctor
-Run: gitmake --verbose
-
-GitMake never force-pushes or deletes repositories.
+USEFUL COMMANDS
+  gitmake init
+  gitmake init --yes
+  gitmake --dry-run
+  gitmake doctor
+  gitmake upgrade
+  gitmake --version

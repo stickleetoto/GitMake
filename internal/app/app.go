@@ -20,7 +20,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.3.1"
+const Version = "0.4.0"
 
 type Options struct {
 	Command     string
@@ -33,6 +33,7 @@ type Options struct {
 	UpdateOnly  bool
 	NoRelease   bool
 	VersionOnly bool
+	Yes         bool
 }
 
 func Main(args []string) int {
@@ -94,6 +95,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.UpdateOnly, "update-only", false, "fail if the GitHub repository does not exist")
 	fs.BoolVar(&o.NoRelease, "no-release", false, "skip release creation even when release.enabled is true")
 	fs.BoolVar(&o.VersionOnly, "version", false, "print version")
+	fs.BoolVar(&o.Yes, "yes", false, "accept safe setup defaults without prompting")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
@@ -158,6 +160,7 @@ Common options:
   --dry-run       Preview without changing GitHub
   --no-release    Skip the configured Release for this run
   --verbose       Show external commands
+  --yes           Accept safe setup defaults (mainly for gitmake init)
   --version       Print GitMake version
 
 Safety:
@@ -172,60 +175,57 @@ func runInit(o Options) error {
 	}
 	configPath := resolveConfigPath(cwd, o.ConfigPath)
 	if _, err := os.Stat(configPath); err == nil {
-		fmt.Println("GitMake setup")
-		fmt.Println()
+		fmt.Printf("GitMake setup · %s\n\n", Version)
 		fmt.Println("✓ Configuration already exists")
 		fmt.Println("  " + configPath)
+		fmt.Println("\nEdit it directly, or remove it and run `gitmake init` again.")
 		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("check config: %w", err)
 	}
+
+	var zipPath string
 	if o.SourceArg != "" {
-		zipPath := o.SourceArg
+		zipPath = o.SourceArg
 		if !filepath.IsAbs(zipPath) {
 			zipPath = filepath.Join(cwd, zipPath)
 		}
-		cfg, err := config.CreateForZIP(configPath, zipPath, false)
+	} else {
+		zips, err := config.DiscoverZIPs(cwd)
 		if err != nil {
 			return err
 		}
-		fmt.Println("GitMake setup")
-		fmt.Println()
-		fmt.Printf("✓ Source      %s\n", filepath.Base(zipPath))
-		fmt.Printf("✓ Repository  %s · %s\n", cfg.Repo.Name, cfg.Repo.Visibility)
-		fmt.Printf("✓ Config      %s\n", configPath)
-		fmt.Println("\nRun `gitmake` to publish.")
-		return nil
-	}
-	zips, err := config.DiscoverZIPs(cwd)
-	if err != nil {
-		return err
-	}
-	if len(zips) == 1 {
-		cfg, err := config.CreateForZIP(configPath, filepath.Join(cwd, zips[0]), false)
-		if err != nil {
-			return err
+		switch len(zips) {
+		case 0:
+			fmt.Printf("GitMake setup · %s\n\n", Version)
+			fmt.Println("No project ZIP found in this folder.")
+			fmt.Println("\nPut a .zip file here, then run:")
+			fmt.Println("  gitmake init")
+			fmt.Println("\nOr choose one directly:")
+			fmt.Println("  gitmake init path\\to\\Project.zip")
+			return nil
+		case 1:
+			zipPath = filepath.Join(cwd, zips[0])
+		default:
+			if o.Yes {
+				return multipleZIPError(zips)
+			}
+			fmt.Printf("GitMake setup · %s\n\n", Version)
+			p := newInitPrompter()
+			selected, err := p.chooseZIP(zips)
+			if err != nil {
+				return err
+			}
+			zipPath = filepath.Join(cwd, selected)
+			fmt.Println()
 		}
-		fmt.Println("GitMake setup")
-		fmt.Println()
-		fmt.Printf("✓ Found       %s\n", zips[0])
-		fmt.Printf("✓ Repository  %s · %s\n", cfg.Repo.Name, cfg.Repo.Visibility)
-		fmt.Printf("✓ Config      %s\n", configPath)
-		fmt.Println("\nRun `gitmake` to publish.")
-		return nil
 	}
-	if len(zips) > 1 {
-		return multipleZIPError(zips)
-	}
-	created, err := config.EnsureStarter(configPath)
+
+	cfg, err := config.ConfigForZIP(configPath, zipPath)
 	if err != nil {
 		return err
 	}
-	if created {
-		fmt.Println("GitMake setup")
-		fmt.Println()
-		fmt.Println("✓ Created gitmake.json template")
-		fmt.Println("  Add a project ZIP, edit the placeholders if needed, then run `gitmake`.")
-	}
-	return nil
+	return runInitWizard(cfg, configPath, filepath.Base(zipPath), o.Yes)
 }
 
 func runInstall() error {

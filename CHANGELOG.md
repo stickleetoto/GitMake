@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.4.0
+
+- Added interactive `gitmake init` wizard.
+- Added numbered source selection for folders with multiple ZIPs.
+- Added repository name, visibility, description, and branch prompts.
+- Added final confirmation before config creation.
+- Added `--yes` safe-default non-interactive setup.
+- `init` with no ZIP no longer creates placeholder config.
+- Setup cancellation leaves the project directory unchanged.
+- Existing config remains protected from accidental overwrite.
+
 ## v0.3.1
 
 - Fixed a Windows `gitmake doctor` false negative where `gitmake --version` worked but doctor still reported PATH as missing.

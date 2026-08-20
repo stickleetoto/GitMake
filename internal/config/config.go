@@ -365,17 +365,10 @@ func deriveRepoName(zipName string) string {
 	return result
 }
 
-// CreateForZIP creates or replaces a GitMake configuration for an explicitly
-// selected ZIP. It is intended for `gitmake init <zip>` and the positional ZIP
-// workflow. Existing configs are only overwritten when overwrite is true.
-func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
-	if !overwrite {
-		if _, err := os.Stat(configPath); err == nil {
-			return Config{}, fmt.Errorf("configuration already exists: %s", configPath)
-		} else if !os.IsNotExist(err) {
-			return Config{}, err
-		}
-	}
+// ConfigForZIP builds a validated default configuration for a selected ZIP
+// without writing anything. Interactive setup uses this so cancelling the
+// wizard leaves the directory untouched.
+func ConfigForZIP(configPath, zipPath string) (Config, error) {
 	absZip, err := filepath.Abs(zipPath)
 	if err != nil {
 		return Config{}, err
@@ -404,6 +397,27 @@ func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
 		Repo:          RepoConfig{Name: deriveRepoName(filepath.Base(absZip)), Visibility: "private"},
 		Source:        SourceConfig{ZIP: rel, StripRoot: &strip},
 		Git:           GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"},
+	}
+	applyDefaults(&cfg)
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// CreateForZIP creates or replaces a GitMake configuration for an explicitly
+// selected ZIP. Existing configs are only overwritten when overwrite is true.
+func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
+	if !overwrite {
+		if _, err := os.Stat(configPath); err == nil {
+			return Config{}, fmt.Errorf("configuration already exists: %s", configPath)
+		} else if !os.IsNotExist(err) {
+			return Config{}, err
+		}
+	}
+	cfg, err := ConfigForZIP(configPath, zipPath)
+	if err != nil {
+		return Config{}, err
 	}
 	if err := Save(configPath, cfg); err != nil {
 		return Config{}, err

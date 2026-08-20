@@ -1,77 +1,53 @@
-# GitMake v0.3.1 Test Report
+# GitMake v0.4.0 Test Report
 
 Date: 2026-08-21
 
 ## Result
 
-**PASS** for all test/build gates available in this environment.
+PASS for the tested development environment and Windows cross-build.
 
-## Regression target
-
-v0.3.1 specifically fixes the Windows doctor/install inconsistency where `gitmake --version` could resolve successfully while `gitmake doctor` still reported that GitMake was not installed on PATH.
-
-The new diagnostic model independently records:
-
-- installed binary at `%LOCALAPPDATA%\\Programs\\GitMake\\gitmake.exe`
-- actual `gitmake` command resolution
-- current-process PATH registration
-- persisted per-user PATH registration
-- whether the running executable is the standard installed copy
-
-Doctor treats a persisted user PATH registration as healthy even when the current shell has not refreshed yet, and manually scans PATH as a fallback when `exec.LookPath`/`PATHEXT` resolution disagrees.
-
-## Automated gates
+## Validation
 
 - `go test ./...` — PASS
 - `go vet ./...` — PASS
 - `go test -race ./...` — PASS
-- `scripts/e2e.sh` — `ALL_E2E_PASS`
-- `scripts/e2e_v03.sh` — `V03_E2E_PASS`
-- Windows amd64 cross-build — PASS
+- Base create/update/release E2E — `ALL_E2E_PASS`
+- v0.3 compatibility E2E — `V03_E2E_PASS`
+- v0.4 init UX E2E — `V04_E2E_PASS`
+- Windows amd64 `gitmake.exe` cross-build — PASS
+- Windows amd64 `GitMake-Setup.exe` cross-build — PASS
+- PE32+ x86-64 executable identification — PASS
 
-## New regression tests
+## v0.4 setup cases covered
 
-`internal/installer/status_test.go` covers:
+- one-ZIP interactive initialization
+- repository name suggestion from versioned ZIP filename
+- public/private visibility selection
+- optional description
+- default branch acceptance
+- final confirmation before writing config
+- multiple-ZIP numbered selection
+- `gitmake init --yes` safe defaults
+- no-ZIP init leaves no placeholder config
+- existing config is not overwritten
+- version/help surfaces updated to 0.4.0
 
-- case-insensitive Windows PATH matching
-- trailing-slash normalization
-- rejecting prefix-only PATH matches
-- healthy state when the installed binary is present and the persisted user PATH is registered even if live command resolution is temporarily unavailable
-- healthy state for resolved/process-PATH/current-installed-copy signals
-- unhealthy state for a binary that exists but has no command/PATH signal
+## Lightweight optimization audit
 
-## Existing E2E coverage retained
+Optimization is not currently a release blocker.
 
-- first-run onboarding
-- CREATE from one ZIP
-- UPDATE with history preservation
-- no-change update
-- Unicode paths
-- ambiguous ZIP handling
-- positional ZIP selection
-- empty GitHub repository population
-- legacy `master` branch fallback
-- dry-run create/update
-- create-only/update-only guards
-- authentication failure
-- Windows-invalid ZIP rejection
-- case-colliding ZIP rejection
-- GitHub Release creation and asset upload
-- no-change Release creation
-- duplicate Release protection
-- `on_existing=skip`
+Measured on the Linux development container (not a Windows performance guarantee):
 
-## Windows limitation of this build environment
+- stripped Windows x64 `gitmake.exe`: about 2.9 MiB
+- stripped Windows x64 Setup: about 1.8 MiB
+- local process startup (`--version`, 100 runs): median ~0.8 ms, p95 ~1.1 ms
+- synthetic 5,000-file / 1 KiB-per-file ZIP: safe extraction ~120 ms
+- mirror of the same 5,000 files: ~94 ms
 
-The binaries are cross-compiled from Linux. Windows-specific registry/PATH mutation and PowerShell command resolution cannot be executed natively here. Those code paths are compile-validated, the decision logic is isolated into cross-platform unit tests, and the Windows executable format was verified after build.
+These local costs are small compared with the normal external work performed by GitMake (`git`, `gh`, cloning, pushing, and network round trips). The main future optimization candidate is snapshot mirroring: updates currently replace the working-tree snapshot before Git computes the diff, which is simple and reliable but causes avoidable disk I/O for very large repositories.
 
-Recommended real-machine acceptance check after installing v0.3.1:
+Recommendation: keep v0.4 focused on UX and correctness. Only introduce differential-copy/hash caching after a benchmark demonstrates that large projects make local snapshot mirroring a meaningful part of total publish time.
 
-```powershell
-gitmake --version
-gitmake doctor
-Get-Command gitmake | Format-List Source,Path,CommandType
-where.exe gitmake
-```
+## Platform note
 
-Expected result: doctor reports both `GitMake install` and `CLI command` as healthy and exits with code 0.
+Windows binaries were cross-compiled and structurally validated in the development environment. The v0.3.1 install/PATH/upgrade path was previously confirmed on a real Windows machine; v0.4 changes are concentrated in project initialization and do not replace that installer layer.

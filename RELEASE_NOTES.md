@@ -1,20 +1,25 @@
-# GitMake v0.3.1
+# GitMake v0.4.0
 
-This is a focused Windows installation/doctor reliability patch.
+GitMake v0.4.0 focuses on first-run project setup UX.
 
-## Fixes
+## New
 
-- Fixes the false `PATH not installed` result that could appear even when `gitmake --version` already worked.
-- `gitmake doctor` now verifies four independent signals: installed binary, resolved command path, current-process PATH, and persisted user PATH.
-- Shows the actual resolved `gitmake.exe` path in diagnostics.
-- Correctly treats a freshly registered user PATH as healthy even if the current shell has not refreshed yet.
-- Adds a fallback manual PATH scan for Windows `PATHEXT` / `exec.LookPath` edge cases.
-- Running `gitmake install` from the already-installed copy no longer attempts to overwrite the executable currently in use.
+- Interactive `gitmake init` wizard.
+- Automatic ZIP discovery when exactly one project ZIP is present.
+- Numbered ZIP selection when multiple archives are present.
+- Repository-name suggestion derived from the ZIP filename.
+- Visibility selection with safe `private` default.
+- Optional repository description and branch selection.
+- Final confirmation before writing `gitmake.json`.
+- `gitmake init --yes` for safe non-interactive defaults.
 
-## Validation
+## UX / safety
 
-- Unit tests
-- Go vet
-- Race detector
-- Existing CREATE/UPDATE/Release E2E suite
-- Windows amd64 cross-build
+- `gitmake init` no longer writes placeholder configuration when there is no ZIP.
+- Cancelling setup leaves the directory unchanged.
+- Existing `gitmake.json` is never overwritten by normal `init`.
+- Daily publishing remains one command: `gitmake`.
+
+## Existing features retained
+
+Repository create/update, snapshot mirroring, Release assets, `doctor`, per-user install, and self-upgrade remain supported.

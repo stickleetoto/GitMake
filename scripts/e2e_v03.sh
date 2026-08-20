@@ -74,7 +74,7 @@ Q="$TMP/multi"; mkdir -p "$Q"; makezip "$Q/A.zip" 'a=x'; makezip "$Q/B.zip" 'b=x
 R="$TMP/positional"; mkdir -p "$R"; makezip "$R/Chosen_v3.0.zip" 'Chosen/c.txt=c'; makezip "$R/asset.zip" 'asset.txt=x'; (cd "$R" && "$BIN" Chosen_v3.0.zip >p 2>&1); grep -q 'Repository created' "$R/p"; grep -q 'Chosen_v3.0.zip' "$R/gitmake.json"
 
 # init does not publish
-I="$TMP/init"; mkdir -p "$I"; makezip "$I/Init_v1.0.zip" 'Init/x=x'; (cd "$I" && "$BIN" init >i 2>&1); grep -q 'Run `gitmake` to publish' "$I/i"; test ! -d "$TMP/remotes/testuser/Init.git"
+I="$TMP/init"; mkdir -p "$I"; makezip "$I/Init_v1.0.zip" 'Init/x=x'; (cd "$I" && "$BIN" init --yes >i 2>&1); grep -q 'Run `gitmake` to publish' "$I/i"; test ! -d "$TMP/remotes/testuser/Init.git"
 
 # release create
 S="$TMP/release"; mkdir -p "$S"; makezip "$S/src.zip" 'root/x=x'; echo asset > "$S/win.bin"; cat > "$S/gitmake.json" <<JSON

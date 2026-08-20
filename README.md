@@ -1,8 +1,8 @@
-# GitMake v0.3.1
+# GitMake v0.4.0
 
 GitMake turns a project ZIP into a GitHub repository with one command. It creates the repository when it does not exist, mirrors later ZIP snapshots into the existing repository while preserving Git history, and can optionally publish GitHub Releases with assets.
 
-v0.3.1 keeps the installable Windows CLI and fixes/strengthens installation diagnostics:
+v0.4.0 keeps the one-command publish flow and adds a clean interactive project setup wizard:
 
 ```powershell
 gitmake
@@ -83,7 +83,7 @@ GitMake never guesses when multiple ZIPs are ambiguous.
 ```text
 gitmake                     Publish/update current project
 gitmake Project.zip         Publish using a specific source ZIP
-gitmake init [Project.zip]  Create gitmake.json
+gitmake init [Project.zip]  Interactive project setup / create gitmake.json
 gitmake doctor              Check Git, gh, login, identity, and PATH
 gitmake install             Install GitMake for the current Windows user
 gitmake upgrade             Upgrade from the latest GitMake GitHub Release
@@ -96,6 +96,7 @@ Common flags:
 --dry-run       Preview without modifying GitHub
 --no-release    Skip configured GitHub Release creation
 --verbose       Print external git/gh commands
+--yes           Accept safe init defaults without prompting
 --keep-temp     Keep the temporary workspace for debugging
 --create-only   Refuse to update an existing repository
 --update-only   Refuse to create a missing repository
@@ -103,12 +104,57 @@ Common flags:
 --version       Print version
 ```
 
+
+## Project setup wizard
+
+For explicit first-time setup, run:
+
+```powershell
+gitmake init
+```
+
+With one ZIP, GitMake detects it automatically. With multiple ZIPs, it shows a numbered selector. The wizard then asks only for values that are useful to humans:
+
+```text
+GitMake setup · 0.4.0
+
+✓ Source      ContextDiet_v1.2.3.zip
+
+Repository name [ContextDiet]:
+Visibility
+  1) Private
+  2) Public
+  3) Internal
+Select [1]: 2
+Description (optional): File context optimizer
+Default branch [main]:
+
+  Repository  ContextDiet · public
+  Branch      main
+  Description File context optimizer
+
+Create gitmake.json? [Y/n]: y
+
+✓ Repository  ContextDiet · public
+✓ Config      ...\gitmake.json
+
+Ready. Run `gitmake` to publish.
+```
+
+For scripts or users who want safe defaults without prompts:
+
+```powershell
+gitmake init --yes
+```
+
+`private` and `main` remain the safe defaults. If no ZIP exists, `init` only explains what to do and does not leave a placeholder config behind.
+
 ## `gitmake doctor`
 
 Example healthy output:
 
 ```text
-GitMake Doctor · 0.3.1
+GitMake Doctor · 0.4.0
 
 ✓ Git              git version 2.x
 ✓ GitHub CLI       gh version 2.x
@@ -190,7 +236,7 @@ GitMake downloads the matching `GitMake_vX.Y.Z_Windows_x64.zip`, stages the new 
 Normal operation intentionally avoids verbose step counters:
 
 ```text
-GitMake 0.3.1
+GitMake 0.4.0
 
   GitMake
   stickleetoto/GitMake · public
