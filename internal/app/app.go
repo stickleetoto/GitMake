@@ -23,7 +23,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.7.2"
+const Version = "0.7.3"
 
 type Options struct {
 	Command       string

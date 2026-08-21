@@ -151,6 +151,7 @@ func (s *mcpServer) tools() []mcpTool {
 	zipArg := map[string]any{"type": "string", "description": "Optional source ZIP path relative to project_dir or absolute."}
 	tools := []mcpTool{
 		{Name: "gitmake_describe", Description: "Return GitMake's machine-readable AI capability manifest.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
+		{Name: "gitmake_prepare", Description: "High-level ZIP-to-reviewed-plan workflow. Discover the source, infer and validate config, run security/preflight/project-identity checks, and create a reviewed plan. In read-only MCP mode, missing config stays in memory; with --allow-write it is persisted atomically by GitMake. Prefer this tool for ZIP-only projects. Do NOT create or edit gitmake.json with host filesystem Write/Edit tools when this tool is available.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json through GitMake's validated atomic writer. Defaults to true only when MCP write access is enabled; false in read-only mode."}})},
 		{Name: "gitmake_project_inspect", Description: "Inspect project config and ZIP discovery state without shell commands or project mutation.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_doctor", Description: "Diagnose Git, GitHub CLI, authentication, identity, installation, and project config without mutating the project.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_discover", Description: "Classify ZIP archives conservatively and identify likely project source/release assets without changing files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
@@ -197,6 +198,15 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 	switch name {
 	case "gitmake_describe":
 		return invokeGitMakeJSON(projectDir, nil, "ai", "describe", "--json")
+	case "gitmake_prepare":
+		persist, err := boolArg(args, "persist_config", s.allowWrite)
+		if err != nil {
+			return nil, err
+		}
+		if persist && !s.allowWrite {
+			return nil, fmt.Errorf("persist_config requires MCP write access; run `gitmake ai setup --write` or call gitmake_prepare without persistence")
+		}
+		return s.prepareProject(projectDir, sourceZIP, persist)
 	case "gitmake_project_inspect":
 		return invokeGitMakeJSON(projectDir, nil, "inspect", "--json")
 	case "gitmake_doctor":
@@ -304,6 +314,111 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
+}
+
+func boolArg(args map[string]any, name string, defaultValue bool) (bool, error) {
+	v, ok := args[name]
+	if !ok || v == nil {
+		return defaultValue, nil
+	}
+	b, ok := v.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s must be a boolean", name)
+	}
+	return b, nil
+}
+
+func (s *mcpServer) prepareProject(projectDir, sourceZIP string, persistConfig bool) (any, error) {
+	dir := effectiveMCPProjectDir(projectDir)
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve project directory: %w", err)
+	}
+	configPath := filepath.Join(absDir, "gitmake.json")
+	_, statErr := os.Stat(configPath)
+	configPresent := statErr == nil
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return nil, fmt.Errorf("check config: %w", statErr)
+	}
+
+	var candidate any
+	configAuthored := false
+	configPersisted := configPresent
+	if configPresent {
+		if _, err := invokeGitMakeJSON(absDir, nil, "config", "validate", "--json"); err != nil {
+			return nil, fmt.Errorf("existing gitmake.json is invalid: %w", err)
+		}
+	} else {
+		cfg, err := projectConfigForSuggestion(absDir, sourceZIP, "", "", "")
+		if err != nil {
+			return nil, err
+		}
+		b, err := json.Marshal(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("encode inferred config: %w", err)
+		}
+		if err := json.Unmarshal(b, &candidate); err != nil {
+			return nil, fmt.Errorf("decode inferred config: %w", err)
+		}
+		if persistConfig {
+			if _, err := invokeGitMakeJSON(absDir, b, "config", "write", "--stdin", "--json"); err != nil {
+				return nil, fmt.Errorf("persist inferred config: %w", err)
+			}
+			configAuthored = true
+			configPersisted = true
+			if _, err := invokeGitMakeJSON(absDir, nil, "config", "validate", "--json"); err != nil {
+				return nil, fmt.Errorf("validate persisted config: %w", err)
+			}
+		}
+	}
+
+	planArgs := []string{"plan", "--json"}
+	if sourceZIP != "" {
+		planArgs = append(planArgs, sourceZIP)
+	}
+	planResult, err := invokeGitMakeJSON(absDir, nil, planArgs...)
+	if err != nil {
+		return planResult, err
+	}
+
+	planMap, _ := planResult.(map[string]any)
+	status := "ready_for_approval"
+	if planMap == nil {
+		status = "prepared"
+	}
+	configMode := "existing"
+	if !configPresent && !configPersisted {
+		configMode = "in_memory"
+	} else if configAuthored {
+		configMode = "gitmake_authored"
+	}
+	result := map[string]any{
+		"schema":  "gitmake.prepare/v1",
+		"ok":      true,
+		"version": Version,
+		"status":  status,
+		"access": map[string]any{
+			"mcp_write_enabled":      s.allowWrite,
+			"project_config_mutated": configAuthored,
+			"github_mutated":         false,
+		},
+		"config": map[string]any{
+			"path":           configPath,
+			"present_before": configPresent,
+			"persisted":      configPersisted,
+			"mode":           configMode,
+			"validated":      true,
+		},
+		"plan":        planResult,
+		"next_action": "Show the reviewed plan provenance, changes, and risk to the user. Do not apply until the user explicitly approves it. For MCP apply, the human must mint a one-shot token with `gitmake approve <plan_id>`.",
+	}
+	if candidate != nil {
+		result["inferred_config"] = candidate
+	}
+	if !configPersisted {
+		result["note"] = "gitmake.json was intentionally kept in memory because MCP is read-only. The reviewed plan remains usable; a later approved apply can persist the same safe defaults after revalidation. Do not write gitmake.json with host filesystem tools."
+	}
+	return result, nil
 }
 
 func stringArg(args map[string]any, name string, required bool) (string, error) {

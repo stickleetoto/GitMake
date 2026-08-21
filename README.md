@@ -1,4 +1,4 @@
-# GitMake v0.7.2
+# GitMake v0.7.3
 
 GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,7 @@ commit + normal push
 optional Release + assets
 ```
 
-v0.7.2 adds project-context safety on top of v0.7.1: repository identity binding, stale-source retarget refusal, destructive mass-deletion gates, stronger plan provenance, and destructive-only human approval tokens.
+v0.7.3 adds a high-level MCP preparation tool, `gitmake_prepare`, on top of the v0.7.2 safety model. An AI can now take a ZIP-only folder from discovery to a reviewed plan in one GitMake tool call without using host filesystem Write/Edit tools.
 
 ## Install
 
@@ -58,6 +58,24 @@ gitmake --dry-run               preview only
 gitmake --dry-run --read-only --json
 gitmake --no-release            skip configured release
 ```
+
+
+## One-call AI preparation
+
+When GitMake MCP is available, agents should prefer the high-level `gitmake_prepare` tool for ZIP-only or unconfigured projects. It performs:
+
+```text
+source discovery
+→ config inference + strict validation
+→ security / GitHub preflight
+→ project identity + managed-sync planning
+→ immutable reviewed plan
+→ stop for human approval
+```
+
+With the default read-only MCP registration, a missing `gitmake.json` stays in memory and GitHub is never mutated. The reviewed plan remains usable. If MCP write access was explicitly enabled with `gitmake ai setup --write`, `gitmake_prepare` may persist the inferred config through GitMake's validated atomic config writer; it still does not publish.
+
+Agents are explicitly instructed not to create or edit `gitmake.json` with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.
 
 ## Managed sync: safe by default
 

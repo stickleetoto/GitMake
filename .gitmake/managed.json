@@ -77,6 +77,7 @@
     "scripts/e2e_v06.sh",
     "scripts/e2e_v061.sh",
     "scripts/e2e_v07.sh",
-    "scripts/e2e_v072.sh"
+    "scripts/e2e_v072.sh",
+    "scripts/e2e_v073.sh"
   ]
 }

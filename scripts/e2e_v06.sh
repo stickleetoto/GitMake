@@ -63,7 +63,7 @@ p.stdin.close(); p.wait(timeout=5)
 p=start(["mcp"])
 r=rpc(p,"initialize",{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}})
 assert r["result"]["serverInfo"]["name"]=="gitmake", r
-assert r["result"]["serverInfo"]["version"]=="0.7.2", r
+assert r["result"]["serverInfo"]["version"]=="0.7.3", r
 p.stdin.close(); p.wait(timeout=5)
 
 print("V06_MCP_E2E_PASS")

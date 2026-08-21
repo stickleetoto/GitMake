@@ -15,7 +15,7 @@ func TestMCPDefaultToolsetIsReadOnly(t *testing.T) {
 	for _, tool := range s.tools() {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"gitmake_describe", "gitmake_project_inspect", "gitmake_doctor", "gitmake_discover", "gitmake_config_suggest", "gitmake_config_schema", "gitmake_config_validate", "gitmake_preview", "gitmake_plan", "gitmake_history"} {
+	for _, want := range []string{"gitmake_describe", "gitmake_prepare", "gitmake_project_inspect", "gitmake_doctor", "gitmake_discover", "gitmake_config_suggest", "gitmake_config_schema", "gitmake_config_validate", "gitmake_preview", "gitmake_plan", "gitmake_history"} {
 		if !names[want] {
 			t.Fatalf("missing read-only tool %s", want)
 		}
@@ -24,6 +24,27 @@ func TestMCPDefaultToolsetIsReadOnly(t *testing.T) {
 		if names[forbidden] {
 			t.Fatalf("mutating tool %s must not be exposed by default", forbidden)
 		}
+	}
+}
+
+func TestMCPPrepareIsAvailableReadOnlyAndCannotForcePersistence(t *testing.T) {
+	s := &mcpServer{}
+	found := false
+	for _, tool := range s.tools() {
+		if tool.Name == "gitmake_prepare" {
+			found = true
+			b, _ := json.Marshal(tool)
+			if !bytes.Contains(b, []byte("Do NOT create or edit gitmake.json")) {
+				t.Fatalf("prepare tool must steer agents away from host writes: %s", b)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("gitmake_prepare tool missing")
+	}
+	_, err := s.callTool("gitmake_prepare", map[string]any{"project_dir": t.TempDir(), "persist_config": true})
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("requires MCP write access")) {
+		t.Fatalf("read-only prepare must reject forced persistence, got %v", err)
 	}
 }
 

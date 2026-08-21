@@ -1,3 +1,14 @@
+## v0.7.3 — High-level MCP Prepare
+
+- Added `gitmake_prepare`, a high-level MCP tool that turns a ZIP-only project into a reviewed GitMake plan in one call.
+- `gitmake_prepare` owns source discovery, config inference/validation, security and GitHub preflight, project-identity checks, managed-sync planning, risk classification, and immutable plan creation.
+- Default read-only MCP mode keeps a missing config in memory and performs no project/GitHub mutation.
+- Write-enabled MCP mode may persist a missing config only through GitMake's validated atomic config writer; it still stops before apply.
+- Added explicit MCP guidance: when `gitmake_prepare` or `gitmake_config_write` exists, agents must not use host filesystem Write/Edit tools to author `gitmake.json`.
+- Added structured `gitmake.prepare/v1` output with config persistence state, reviewed plan, access state, and next-action guidance.
+- Added focused E2E coverage for read-only ZIP-only preparation and write-enabled atomic config persistence.
+- Re-ran base, v0.3, v0.4, v0.5, v0.5.1, v0.5.2, v0.6, v0.6.1, v0.7, v0.7.2, and v0.7.3 regression suites.
+
 ## v0.7.2 — Project Identity + Destructive Change Gate
 
 - Added protected repository identity metadata in `.gitmake/project.json` and validation before updates.
@@ -9,7 +20,7 @@
 - MCP destructive apply requires a separately human-minted `gitmake approve <plan_id> --destructive` one-shot token; normal approval tokens are rejected.
 - Added explicit config-vs-remote visibility mismatch reporting without changing existing repository visibility.
 - Added ZIP-only MCP E2E coverage: inspect → config suggest → config write → plan with no hand-authored config.
-- Added v0.7.2 safety E2E coverage for stale-source retarget refusal, destructive plan gating, destructive token replay rejection, identity tamper detection, and plan provenance.
+- Added v0.7.3 safety E2E coverage for stale-source retarget refusal, destructive plan gating, destructive token replay rejection, identity tamper detection, and plan provenance.
 
 ## v0.7.1
 
