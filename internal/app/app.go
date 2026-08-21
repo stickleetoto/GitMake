@@ -13,6 +13,7 @@ import (
 
 	"gitmake/internal/archive"
 	"gitmake/internal/config"
+	"gitmake/internal/discovery"
 	"gitmake/internal/github"
 	"gitmake/internal/gitops"
 	"gitmake/internal/installer"
@@ -21,23 +22,26 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.5.0"
+const Version = "0.5.2"
 
 type Options struct {
-	Command     string
-	ConfigPath  string
-	SourceArg   string
-	DryRun      bool
-	Verbose     bool
-	KeepTemp    bool
-	CreateOnly  bool
-	UpdateOnly  bool
-	NoRelease   bool
-	VersionOnly bool
-	Yes         bool
-	JSON        bool
-	ReadOnly    bool
-	State       *PipelineState
+	Command      string
+	ConfigPath   string
+	SourceArg    string
+	DryRun       bool
+	Verbose      bool
+	KeepTemp     bool
+	CreateOnly   bool
+	UpdateOnly   bool
+	NoRelease    bool
+	VersionOnly  bool
+	Yes          bool
+	JSON         bool
+	ReadOnly     bool
+	PlanID       string
+	ConfigAction string
+	Stdin        bool
+	State        *PipelineState
 }
 
 func Main(args []string) int {
@@ -45,7 +49,7 @@ func Main(args []string) int {
 	opts, err := parseArgs(args)
 	if err != nil {
 		if jsonRequested {
-			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: "unknown", ExitCode: 2, Error: &MachineError{Kind: "usage_error", Message: err.Error()}})
+			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: "unknown", ExitCode: 2, Error: &MachineError{Kind: "usage_error", Code: "USAGE_ERROR", Message: err.Error(), Recoverable: true, SuggestedAction: "Run `gitmake help`."}})
 		} else {
 			printFriendlyError(err)
 		}
@@ -62,9 +66,9 @@ func Main(args []string) int {
 
 	// AI subcommands own their JSON schema because agents consume these files
 	// directly as capability/installation metadata.
-	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install") {
+	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "discover" || opts.Command == "plan" || opts.Command == "history" || opts.Command == "config") {
 		if err := Run(opts); err != nil {
-			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: &MachineError{Kind: "runtime_error", Message: err.Error()}})
+			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: classifyMachineError(err, opts.State)})
 			return 1
 		}
 		return 0
@@ -76,14 +80,24 @@ func Main(args []string) int {
 		result := MachineResult{Schema: "gitmake.result/v1", OK: runErr == nil, Version: Version, Command: opts.Command, ExitCode: 0, Pipeline: opts.State, Output: output}
 		if runErr != nil {
 			result.ExitCode = 1
-			result.Error = &MachineError{Kind: "runtime_error", Message: runErr.Error()}
+			result.Error = classifyMachineError(runErr, opts.State)
+		}
+		if opts.Command == "publish" || opts.Command == "apply" {
+			recordHistory(opts, runErr)
 		}
 		_ = emitJSON(result)
 		return result.ExitCode
 	}
 
-	if err := Run(opts); err != nil {
-		printFriendlyError(err)
+	if opts.State == nil && (opts.Command == "publish" || opts.Command == "apply") {
+		opts.State = newPipeline(opts)
+	}
+	runErr := Run(opts)
+	if opts.Command == "publish" || opts.Command == "apply" {
+		recordHistory(opts, runErr)
+	}
+	if runErr != nil {
+		printFriendlyError(runErr)
 		return 1
 	}
 	return 0
@@ -123,7 +137,19 @@ func parseArgs(args []string) (Options, error) {
 	var o Options
 	o.Command = "publish"
 	if len(args) > 0 {
-		if args[0] == "ai" {
+		if args[0] == "config" {
+			if len(args) < 2 {
+				return Options{}, errors.New("usage: gitmake config <schema|validate|write|patch>")
+			}
+			switch args[1] {
+			case "schema", "validate", "write", "patch":
+				o.Command = "config"
+				o.ConfigAction = args[1]
+			default:
+				return Options{}, fmt.Errorf("unknown config command %q (expected schema, validate, write, or patch)", args[1])
+			}
+			args = args[2:]
+		} else if args[0] == "ai" {
 			if len(args) < 2 {
 				return Options{}, errors.New("usage: gitmake ai <describe|install>")
 			}
@@ -138,13 +164,14 @@ func parseArgs(args []string) (Options, error) {
 			args = args[2:]
 		} else {
 			switch args[0] {
-			case "init", "doctor", "install", "upgrade", "help":
+			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "history":
 				o.Command = args[0]
 				args = args[1:]
 			}
 		}
 	}
 
+	args = normalizeFlagOrder(args)
 	fs := flag.NewFlagSet("gitmake", flag.ContinueOnError)
 	if hasArg(args, "--json") {
 		fs.SetOutput(io.Discard)
@@ -161,7 +188,8 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.VersionOnly, "version", false, "print version")
 	fs.BoolVar(&o.Yes, "yes", false, "accept safe setup defaults without prompting")
 	fs.BoolVar(&o.JSON, "json", false, "emit machine-readable JSON output")
-	fs.BoolVar(&o.ReadOnly, "read-only", false, "block local/GitHub mutations; publish requires --dry-run and an existing config")
+	fs.BoolVar(&o.ReadOnly, "read-only", false, "block project/GitHub mutations; publish requires --dry-run")
+	fs.BoolVar(&o.Stdin, "stdin", false, "read config JSON or patch JSON from standard input")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
@@ -171,13 +199,18 @@ func parseArgs(args []string) (Options, error) {
 	}
 
 	switch o.Command {
-	case "publish":
+	case "publish", "plan":
 		if len(rest) > 1 {
 			return Options{}, fmt.Errorf("expected at most one ZIP path, got: %s", strings.Join(rest, " "))
 		}
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
 		}
+	case "apply":
+		if len(rest) != 1 {
+			return Options{}, fmt.Errorf("usage: gitmake apply <plan_id>")
+		}
+		o.PlanID = rest[0]
 	case "init":
 		if len(rest) > 1 {
 			return Options{}, fmt.Errorf("usage: gitmake init [project.zip]")
@@ -185,7 +218,14 @@ func parseArgs(args []string) (Options, error) {
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
 		}
-	case "doctor", "install", "upgrade", "help", "ai-describe", "ai-install":
+	case "config":
+		if len(rest) != 0 {
+			return Options{}, fmt.Errorf("gitmake config %s does not accept positional arguments", o.ConfigAction)
+		}
+		if (o.ConfigAction == "write" || o.ConfigAction == "patch") && !o.Stdin {
+			return Options{}, fmt.Errorf("gitmake config %s requires --stdin", o.ConfigAction)
+		}
+	case "doctor", "install", "upgrade", "help", "discover", "history", "ai-describe", "ai-install":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
 		}
@@ -193,11 +233,41 @@ func parseArgs(args []string) (Options, error) {
 	return o, nil
 }
 
+func normalizeFlagOrder(args []string) []string {
+	if len(args) < 2 {
+		return args
+	}
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "-") {
+			flags = append(flags, a)
+			if a == "--config" || a == "-config" {
+				if i+1 < len(args) {
+					i++
+					flags = append(flags, args[i])
+				}
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	return append(flags, positional...)
+}
+
 func Run(o Options) error {
 	if o.ReadOnly {
 		switch o.Command {
-		case "install", "upgrade", "init", "ai-install":
+		case "install", "upgrade", "init", "ai-install", "apply":
 			return fmt.Errorf("read-only mode blocks `gitmake %s`", strings.ReplaceAll(o.Command, "ai-", "ai "))
+		case "config":
+			if o.ConfigAction == "write" || o.ConfigAction == "patch" {
+				return fmt.Errorf("read-only mode blocks `gitmake config %s`", o.ConfigAction)
+			}
 		case "publish":
 			if !o.DryRun {
 				return errors.New("read-only publish requires --dry-run")
@@ -210,6 +280,16 @@ func Run(o Options) error {
 		return nil
 	case "doctor":
 		return runDoctor(o)
+	case "discover":
+		return runDiscover(o)
+	case "plan":
+		return runPlan(o)
+	case "apply":
+		return runApply(o)
+	case "history":
+		return runHistory(o)
+	case "config":
+		return runConfig(o)
 	case "install":
 		return runInstall()
 	case "upgrade":
@@ -233,6 +313,14 @@ Usage:
   gitmake Project.zip         Use a specific source ZIP
   gitmake init [Project.zip]  Create gitmake.json
   gitmake doctor              Check Git, GitHub CLI, login, identity, and PATH
+  gitmake discover            Classify project/release ZIPs without changing files
+  gitmake plan [Project.zip]  Create an immutable reviewed publish plan
+  gitmake apply <plan_id>     Revalidate and apply a previously reviewed plan
+  gitmake history             Show recent GitMake publish/apply operations
+  gitmake config schema       Print the machine-readable config schema
+  gitmake config validate     Validate gitmake.json
+  gitmake config write --stdin  Validate and write config JSON from stdin
+  gitmake config patch --stdin  Merge a JSON patch into gitmake.json
   gitmake install             Install GitMake for the current Windows user
   gitmake upgrade             Upgrade GitMake from its latest GitHub Release
   gitmake ai describe         Explain GitMake capabilities to AI agents
@@ -475,6 +563,78 @@ func firstLine(v string) string {
 	return v
 }
 
+func runDiscover(o Options) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	report, err := discovery.Analyze(cwd)
+	if err != nil {
+		return err
+	}
+	if o.JSON {
+		return emitJSON(report)
+	}
+	fmt.Printf("GitMake Discovery · %s\n\n", Version)
+	if len(report.Archives) == 0 {
+		fmt.Println("No ZIP files found in this folder.")
+		return nil
+	}
+	for _, a := range report.Archives {
+		label := a.Classification
+		if label == "" {
+			label = "unknown"
+		}
+		fmt.Printf("%-14s %s", label, a.Name)
+		if a.SourceScore != 0 || a.AssetScore != 0 {
+			fmt.Printf("  source=%d asset=%d", a.SourceScore, a.AssetScore)
+		}
+		if a.Error != "" {
+			fmt.Printf("  error=%s", a.Error)
+		}
+		fmt.Println()
+	}
+	fmt.Println()
+	if report.SelectedSource != "" {
+		fmt.Printf("✓ Source             %s (%s)\n", report.SelectedSource, report.SourceConfidence)
+	} else if report.NeedsInput {
+		fmt.Println("× Source             ambiguous; choose one explicitly with `gitmake Project.zip`")
+	} else {
+		fmt.Println("× Source             not resolved")
+	}
+	if len(report.ReleaseAssets) > 0 {
+		fmt.Printf("· Release assets     %s\n", strings.Join(report.ReleaseAssets, ", "))
+	}
+	if len(report.Unknown) > 0 {
+		fmt.Printf("· Unclassified       %s\n", strings.Join(report.Unknown, ", "))
+	}
+	return nil
+}
+
+func discoveryStateFromReport(r discovery.Report) *DiscoveryState {
+	state := &DiscoveryState{
+		SelectedSource:        r.SelectedSource,
+		SourceConfidence:      r.SourceConfidence,
+		SourceConfidenceScore: r.SourceConfidenceScore,
+		SelectedSourceScore:   r.SelectedSourceScore,
+		SelectedEvidence:      append([]string(nil), r.SelectedEvidence...),
+		ReleaseAssets:         append([]string(nil), r.ReleaseAssets...),
+		Unknown:               append([]string(nil), r.Unknown...),
+		NeedsInput:            r.NeedsInput,
+		Reason:                r.Reason,
+	}
+	for _, a := range r.Archives {
+		if a.Error == "" && a.Classification != "release_asset" {
+			state.Candidates = append(state.Candidates, a.Name)
+		}
+		state.CandidateDetails = append(state.CandidateDetails, DiscoveryCandidate{
+			Name: a.Name, Classification: a.Classification, SourceScore: a.SourceScore,
+			AssetScore: a.AssetScore, Reasons: append([]string(nil), a.Reasons...),
+		})
+	}
+	return state
+}
+
 func runPublish(o Options) error {
 	started := time.Now()
 	if o.State != nil {
@@ -485,73 +645,122 @@ func runPublish(o Options) error {
 		return err
 	}
 	configPath := resolveConfigPath(cwd, o.ConfigPath)
-	if o.ReadOnly {
-		if _, err := os.Stat(configPath); os.IsNotExist(err) {
-			return fmt.Errorf("read-only mode will not create %s; run `gitmake init` first", configPath)
-		} else if err != nil {
-			return fmt.Errorf("check config: %w", err)
-		}
-	}
 
-	// Positional ZIP gives an unambiguous source. If no config exists, create
-	// one beside the current project automatically. If a config does exist,
-	// use the supplied ZIP for this invocation without rewriting unrelated
-	// repository/release settings.
+	// A positional ZIP is the strongest source-selection signal. It never
+	// requires archive classification and, in read-only mode, never causes a
+	// config file to be written.
 	var explicitZip string
 	if o.SourceArg != "" {
 		explicitZip = o.SourceArg
 		if !filepath.IsAbs(explicitZip) {
 			explicitZip = filepath.Join(cwd, explicitZip)
 		}
-		if _, err := os.Stat(explicitZip); err != nil {
-			return fmt.Errorf("source ZIP: %w", err)
+		info, statErr := os.Stat(explicitZip)
+		if statErr != nil {
+			return fmt.Errorf("source ZIP: %w", statErr)
+		}
+		if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(explicitZip), ".zip") {
+			return fmt.Errorf("source must be a regular .zip file: %s", explicitZip)
 		}
 	}
 
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		if explicitZip != "" {
-			if _, err := config.CreateForZIP(configPath, explicitZip, false); err != nil {
-				return err
+	var cfg config.Config
+	var zipPath string
+	repaired := false
+	configPersisted := false
+	configSource := "file"
+	configExists := false
+	if _, statErr := os.Stat(configPath); statErr == nil {
+		configExists = true
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("check config: %w", statErr)
+	}
+
+	if configExists {
+		cfg, err = config.Load(configPath)
+		if err != nil {
+			return err
+		}
+		configPersisted = true
+		zipPath = explicitZip
+		if zipPath == "" {
+			if o.ReadOnly {
+				zipPath, err = config.ResolveProjectZIPReadOnly(configPath, cfg)
+			} else {
+				zipPath, repaired, err = config.ResolveProjectZIP(configPath, &cfg)
 			}
-		} else {
-			zips, err := config.DiscoverZIPs(cwd)
 			if err != nil {
 				return err
 			}
-			if len(zips) == 0 {
-				fmt.Printf("GitMake %s\n\n", Version)
-				fmt.Println("No project ZIP found in this folder.")
-				fmt.Println("\nPut one .zip file here and run `gitmake`, or use:\n  gitmake path\\to\\Project.zip")
-				return nil
-			}
-			if len(zips) > 1 {
-				return multipleZIPError(zips)
-			}
-			if _, err := config.CreateForZIP(configPath, filepath.Join(cwd, zips[0]), false); err != nil {
-				return err
-			}
 		}
-	}
+	} else {
+		configSource = "inferred"
+		zipPath = explicitZip
+		if zipPath == "" {
+			report, discoverErr := discovery.Analyze(cwd)
+			if discoverErr != nil {
+				return discoverErr
+			}
+			if o.State != nil {
+				o.State.Discovery = discoveryStateFromReport(report)
+			}
+			if report.SelectedSource == "" {
+				if len(report.Archives) == 0 {
+					if o.ReadOnly || o.JSON {
+						return config.ErrNoProjectZIP
+					}
+					fmt.Printf("GitMake %s\n\n", Version)
+					fmt.Println("No project ZIP found in this folder.")
+					fmt.Println("\nPut one .zip file here and run `gitmake`, or use:\n  gitmake path\\to\\Project.zip")
+					return nil
+				}
+				if report.NeedsInput {
+					return errors.New("multiple source candidates found; run `gitmake discover --json` or choose one explicitly with `gitmake Project.zip`")
+				}
+				return errors.New("no usable project ZIP could be selected; run `gitmake discover --json` for details")
+			}
+			zipPath = filepath.Join(cwd, report.SelectedSource)
+		}
 
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return err
-	}
-	zipPath := explicitZip
-	repaired := false
-	if zipPath == "" {
-		if o.ReadOnly {
-			zipPath, err = config.ResolveProjectZIPReadOnly(configPath, cfg)
-		} else {
-			zipPath, repaired, err = config.ResolveProjectZIP(configPath, &cfg)
-		}
+		// Build the same validated defaults as `gitmake init`, but keep them in
+		// memory for read-only previews. A mutating run persists them once.
+		cfg, err = config.ConfigForZIP(configPath, zipPath)
 		if err != nil {
 			return err
+		}
+		if !o.ReadOnly {
+			cfg, err = config.CreateForZIP(configPath, zipPath, false)
+			if err != nil {
+				return err
+			}
+			configPersisted = true
+		}
+	}
+	zipPath, err = filepath.Abs(zipPath)
+	if err != nil {
+		return fmt.Errorf("resolve source ZIP path: %w", err)
+	}
+	sourceSHA, err := sha256File(zipPath)
+	if err != nil {
+		return fmt.Errorf("hash source ZIP: %w", err)
+	}
+	configSHA := ""
+	if configPersisted {
+		configSHA, err = sha256File(configPath)
+		if err != nil {
+			return fmt.Errorf("hash config: %w", err)
 		}
 	}
 	if o.State != nil {
 		o.State.Source = filepath.Base(zipPath)
+		o.State.SourcePath = zipPath
+		o.State.SourceSHA256 = sourceSHA
 		o.State.Visibility = cfg.Repo.Visibility
+		configState := &ConfigState{Source: configSource, Persisted: configPersisted, SHA256: configSHA}
+		if configPersisted {
+			configState.Path = configPath
+		}
+		o.State.Config = configState
 		o.State.enter("PLAN")
 	}
 
@@ -597,10 +806,11 @@ func runPublish(o Options) error {
 		return err
 	}
 	if o.State != nil {
-		o.State.Release = &ReleaseState{Enabled: release.enabled, Tag: release.spec.Tag, Assets: len(release.spec.Assets), Skipped: release.skipExisting || !release.enabled}
-		if release.existingURL != "" {
-			o.State.Release.URL = release.existingURL
+		releaseState, stateErr := releaseStateFromPlan(release)
+		if stateErr != nil {
+			return stateErr
 		}
+		o.State.Release = releaseState
 	}
 
 	fmt.Printf("GitMake %s\n\n", Version)
@@ -608,6 +818,13 @@ func runPublish(o Options) error {
 	fmt.Printf("  %s · %s\n\n", target, cfg.Repo.Visibility)
 	if repaired {
 		fmt.Printf("✓ Source selected       %s\n", filepath.Base(zipPath))
+	}
+	if configSource == "inferred" {
+		if o.ReadOnly {
+			fmt.Printf("· Config inferred       memory only · %s\n", filepath.Base(zipPath))
+		} else {
+			fmt.Printf("✓ Config created        %s\n", configPath)
+		}
 	}
 
 	if o.State != nil {
@@ -715,7 +932,11 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	err = finishRelease(release, target, cfg.Git.Branch, false, gh)
 	if o.State != nil {
 		if o.State.Release != nil && release.enabled && !release.skipExisting && err == nil {
-			o.State.Release.Created = true
+			if release.resumeExisting {
+				o.State.Release.Resumed = true
+			} else {
+				o.State.Release.Created = true
+			}
 		}
 		o.State.enter("REPORT")
 	}
@@ -734,8 +955,13 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	if err != nil {
 		return err
 	}
+	baseCommit, err := git.HeadSHA(repoDir)
+	if err != nil {
+		return err
+	}
 	if o.State != nil {
 		o.State.Branch = branch
+		o.State.BaseCommit = baseCommit
 	}
 	if fallback {
 		fmt.Printf("· Branch fallback       %s → %s\n", cfg.Git.Branch, branch)
@@ -765,7 +991,11 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		err := finishRelease(release, target, branch, o.DryRun, gh)
 		if o.State != nil {
 			if o.State.Release != nil && release.enabled && !release.skipExisting && !o.DryRun && err == nil {
-				o.State.Release.Created = true
+				if release.resumeExisting {
+					o.State.Release.Resumed = true
+				} else {
+					o.State.Release.Created = true
+				}
 			}
 			o.State.enter("REPORT")
 		}
@@ -823,7 +1053,11 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	err = finishRelease(release, target, branch, false, gh)
 	if o.State != nil {
 		if o.State.Release != nil && release.enabled && !release.skipExisting && err == nil {
-			o.State.Release.Created = true
+			if release.resumeExisting {
+				o.State.Release.Resumed = true
+			} else {
+				o.State.Release.Created = true
+			}
 		}
 		o.State.enter("REPORT")
 	}

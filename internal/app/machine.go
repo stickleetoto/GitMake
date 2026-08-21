@@ -10,19 +10,59 @@ import (
 )
 
 type PipelineState struct {
-	Stage           string        `json:"stage,omitempty"`
-	CompletedStages []string      `json:"completed_stages,omitempty"`
-	Mode            string        `json:"mode,omitempty"`
-	Repository      string        `json:"repository,omitempty"`
-	Visibility      string        `json:"visibility,omitempty"`
-	Branch          string        `json:"branch,omitempty"`
-	Source          string        `json:"source,omitempty"`
-	Files           int           `json:"files,omitempty"`
-	Changes         *ChangeCounts `json:"changes,omitempty"`
-	RepositoryURL   string        `json:"repository_url,omitempty"`
-	Release         *ReleaseState `json:"release,omitempty"`
-	DryRun          bool          `json:"dry_run,omitempty"`
-	ReadOnly        bool          `json:"read_only,omitempty"`
+	Stage           string          `json:"stage,omitempty"`
+	CompletedStages []string        `json:"completed_stages,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	Repository      string          `json:"repository,omitempty"`
+	Visibility      string          `json:"visibility,omitempty"`
+	Branch          string          `json:"branch,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	SourcePath      string          `json:"source_path,omitempty"`
+	SourceSHA256    string          `json:"source_sha256,omitempty"`
+	BaseCommit      string          `json:"base_commit,omitempty"`
+	PlanID          string          `json:"plan_id,omitempty"`
+	Files           int             `json:"files,omitempty"`
+	Changes         *ChangeCounts   `json:"changes,omitempty"`
+	RepositoryURL   string          `json:"repository_url,omitempty"`
+	Release         *ReleaseState   `json:"release,omitempty"`
+	DryRun          bool            `json:"dry_run,omitempty"`
+	ReadOnly        bool            `json:"read_only,omitempty"`
+	Config          *ConfigState    `json:"config,omitempty"`
+	Discovery       *DiscoveryState `json:"discovery,omitempty"`
+}
+
+type ConfigState struct {
+	Source    string `json:"source"`
+	Persisted bool   `json:"persisted"`
+	Path      string `json:"path,omitempty"`
+	SHA256    string `json:"sha256,omitempty"`
+}
+
+type DiscoveryState struct {
+	SelectedSource        string               `json:"selected_source,omitempty"`
+	SourceConfidence      string               `json:"source_confidence,omitempty"`
+	SourceConfidenceScore float64              `json:"source_confidence_score,omitempty"`
+	SelectedSourceScore   int                  `json:"selected_source_score,omitempty"`
+	SelectedEvidence      []string             `json:"selected_evidence,omitempty"`
+	CandidateDetails      []DiscoveryCandidate `json:"candidate_details,omitempty"`
+	ReleaseAssets         []string             `json:"release_assets,omitempty"`
+	Unknown               []string             `json:"unknown,omitempty"`
+	NeedsInput            bool                 `json:"needs_input"`
+	Reason                string               `json:"reason,omitempty"`
+	Candidates            []string             `json:"candidates,omitempty"`
+}
+
+type DiscoveryCandidate struct {
+	Name           string   `json:"name"`
+	Classification string   `json:"classification"`
+	SourceScore    int      `json:"source_score"`
+	AssetScore     int      `json:"asset_score"`
+	Reasons        []string `json:"reasons,omitempty"`
+}
+
+type FileDigest struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
 }
 
 type ChangeCounts struct {
@@ -32,12 +72,15 @@ type ChangeCounts struct {
 }
 
 type ReleaseState struct {
-	Enabled bool   `json:"enabled"`
-	Tag     string `json:"tag,omitempty"`
-	Assets  int    `json:"assets,omitempty"`
-	Created bool   `json:"created,omitempty"`
-	Skipped bool   `json:"skipped,omitempty"`
-	URL     string `json:"url,omitempty"`
+	Enabled      bool         `json:"enabled"`
+	Tag          string       `json:"tag,omitempty"`
+	Assets       int          `json:"assets,omitempty"`
+	AssetDigests []FileDigest `json:"asset_digests,omitempty"`
+	NotesSHA256  string       `json:"notes_sha256,omitempty"`
+	Created      bool         `json:"created,omitempty"`
+	Resumed      bool         `json:"resumed,omitempty"`
+	Skipped      bool         `json:"skipped,omitempty"`
+	URL          string       `json:"url,omitempty"`
 }
 
 type MachineResult struct {
@@ -52,8 +95,12 @@ type MachineResult struct {
 }
 
 type MachineError struct {
-	Kind    string `json:"kind"`
-	Message string `json:"message"`
+	Kind            string `json:"kind"`
+	Code            string `json:"code"`
+	Message         string `json:"message"`
+	Stage           string `json:"stage,omitempty"`
+	Recoverable     bool   `json:"recoverable"`
+	SuggestedAction string `json:"suggested_action,omitempty"`
 }
 
 func newPipeline(o Options) *PipelineState {

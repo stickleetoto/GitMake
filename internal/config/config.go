@@ -95,7 +95,7 @@ func Load(path string) (Config, error) {
 
 	applyDefaults(&c)
 	if err := c.Validate(); err != nil {
-		return Config{}, err
+		return Config{}, fmt.Errorf("config validation: %w", err)
 	}
 	return c, nil
 }
@@ -184,9 +184,9 @@ func (c Config) Validate() error {
 			return fmt.Errorf("release requires notes, notes_file, or generate_notes=true to stay non-interactive")
 		}
 		switch c.Release.OnExisting {
-		case "error", "skip":
+		case "error", "skip", "resume":
 		default:
-			return fmt.Errorf("release.on_existing must be error or skip")
+			return fmt.Errorf("release.on_existing must be error, skip, or resume")
 		}
 		for _, asset := range c.Release.Assets {
 			if strings.TrimSpace(asset) == "" {
@@ -340,6 +340,11 @@ func isPlaceholderRepo(name string) bool {
 
 func deriveRepoName(zipName string) string {
 	name := strings.TrimSuffix(zipName, filepath.Ext(zipName))
+	// Source archives are commonly named Project_v1.2.3_Source.zip. Strip the
+	// archive-role suffix first, then the version, so configless discovery
+	// infers the repository as `Project` rather than `Project_v1.2.3_Source`.
+	roleSuffix := regexp.MustCompile(`(?i)(?:[-_. ]+(?:source|src|code))$`)
+	name = roleSuffix.ReplaceAllString(name, "")
 	versionSuffix := regexp.MustCompile(`(?i)(?:[-_. ]+v?\d+(?:\.\d+){0,3}(?:[-_.][A-Za-z0-9]+)?)$`)
 	name = versionSuffix.ReplaceAllString(name, "")
 	name = strings.TrimSpace(name)

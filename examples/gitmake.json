@@ -6,7 +6,7 @@
     "visibility": "private"
   },
   "source": {
-    "zip": "GitMake-Demo_v0.5.0.zip",
+    "zip": "GitMake-Demo_v0.5.2.zip",
     "strip_root": true
   },
   "git": {

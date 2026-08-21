@@ -12,11 +12,12 @@ import (
 )
 
 type releasePlan struct {
-	enabled      bool
-	disabledWhy  string
-	skipExisting bool
-	existingURL  string
-	spec         github.ReleaseCreateOptions
+	enabled        bool
+	disabledWhy    string
+	skipExisting   bool
+	resumeExisting bool
+	existingURL    string
+	spec           github.ReleaseCreateOptions
 }
 
 func prepareReleasePlan(configPath, target string, repoExists bool, cfg config.Config, noRelease bool, git gitops.Client, gh github.Client) (releasePlan, error) {
@@ -28,19 +29,6 @@ func prepareReleasePlan(configPath, target string, repoExists bool, cfg config.C
 	}
 	if err := git.ValidateTag(cfg.Release.Tag); err != nil {
 		return releasePlan{}, err
-	}
-
-	if repoExists {
-		info, exists, err := gh.Release(target, cfg.Release.Tag)
-		if err != nil {
-			return releasePlan{}, err
-		}
-		if exists {
-			if cfg.Release.OnExisting == "skip" {
-				return releasePlan{enabled: true, skipExisting: true, existingURL: info.URL, spec: github.ReleaseCreateOptions{Tag: cfg.Release.Tag}}, nil
-			}
-			return releasePlan{}, fmt.Errorf("release %s already exists in %s (set release.on_existing to \"skip\" to ignore it)", cfg.Release.Tag, target)
-		}
 	}
 
 	base := filepath.Dir(configPath)
@@ -75,21 +63,44 @@ func prepareReleasePlan(configPath, target string, repoExists bool, cfg config.C
 	if cfg.Release.GenerateNotes != nil {
 		generateNotes = *cfg.Release.GenerateNotes
 	}
+	spec := github.ReleaseCreateOptions{
+		Tag: cfg.Release.Tag, Title: cfg.Release.Title, Notes: cfg.Release.Notes,
+		NotesFile: notesFile, GenerateNotes: generateNotes, Assets: assets,
+		Draft: cfg.Release.Draft, Prerelease: cfg.Release.Prerelease, Latest: cfg.Release.Latest,
+	}
 
-	return releasePlan{
-		enabled: true,
-		spec: github.ReleaseCreateOptions{
-			Tag:           cfg.Release.Tag,
-			Title:         cfg.Release.Title,
-			Notes:         cfg.Release.Notes,
-			NotesFile:     notesFile,
-			GenerateNotes: generateNotes,
-			Assets:        assets,
-			Draft:         cfg.Release.Draft,
-			Prerelease:    cfg.Release.Prerelease,
-			Latest:        cfg.Release.Latest,
-		},
-	}, nil
+	if repoExists {
+		info, exists, err := gh.Release(target, cfg.Release.Tag)
+		if err != nil {
+			return releasePlan{}, err
+		}
+		if exists {
+			switch cfg.Release.OnExisting {
+			case "skip":
+				return releasePlan{enabled: true, skipExisting: true, existingURL: info.URL, spec: spec}, nil
+			case "resume":
+				uploaded := make(map[string]bool)
+				for _, a := range info.Assets {
+					uploaded[strings.ToLower(a.Name)] = true
+				}
+				missing := make([]string, 0, len(assets))
+				for _, a := range assets {
+					if !uploaded[strings.ToLower(filepath.Base(a))] {
+						missing = append(missing, a)
+					}
+				}
+				spec.Assets = missing
+				if len(missing) == 0 {
+					return releasePlan{enabled: true, skipExisting: true, existingURL: info.URL, spec: spec}, nil
+				}
+				return releasePlan{enabled: true, resumeExisting: true, existingURL: info.URL, spec: spec}, nil
+			default:
+				return releasePlan{}, fmt.Errorf("release %s already exists in %s (set release.on_existing to \"skip\" or \"resume\" if appropriate)", cfg.Release.Tag, target)
+			}
+		}
+	}
+
+	return releasePlan{enabled: true, spec: spec}, nil
 }
 
 func resolveRegularFile(base, configured, field string) (string, error) {
@@ -119,7 +130,7 @@ func finishRelease(plan releasePlan, target, branch string, dryRun bool, gh gith
 		return nil
 	}
 	if plan.skipExisting {
-		fmt.Printf("✓ Release               %s already exists\n", plan.spec.Tag)
+		fmt.Printf("✓ Release               %s already exists / complete\n", plan.spec.Tag)
 		if plan.existingURL != "" {
 			fmt.Println("  " + plan.existingURL)
 		}
@@ -128,7 +139,22 @@ func finishRelease(plan releasePlan, target, branch string, dryRun bool, gh gith
 
 	plan.spec.Target = branch
 	if dryRun {
-		fmt.Printf("· Release plan          %s · %d assets\n", plan.spec.Tag, len(plan.spec.Assets))
+		if plan.resumeExisting {
+			fmt.Printf("· Release resume plan   %s · %d missing assets\n", plan.spec.Tag, len(plan.spec.Assets))
+		} else {
+			fmt.Printf("· Release plan          %s · %d assets\n", plan.spec.Tag, len(plan.spec.Assets))
+		}
+		return nil
+	}
+
+	if plan.resumeExisting {
+		if err := gh.UploadReleaseAssets(target, plan.spec.Tag, plan.spec.Assets); err != nil {
+			return err
+		}
+		fmt.Printf("✓ Release resumed       %s · %d assets uploaded\n", plan.spec.Tag, len(plan.spec.Assets))
+		if plan.existingURL != "" {
+			fmt.Println("  " + plan.existingURL)
+		}
 		return nil
 	}
 

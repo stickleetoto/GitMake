@@ -107,6 +107,24 @@ func (c Client) HasHead(dir string) (bool, error) {
 	return false, fmt.Errorf("check repository HEAD: %s", msg(res))
 }
 
+func (c Client) HeadSHA(dir string) (string, error) {
+	has, err := c.HasHead(dir)
+	if err != nil {
+		return "", err
+	}
+	if !has {
+		return "", nil
+	}
+	res, err := c.Run.Run(dir, "git", "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("resolve repository HEAD: %s", msg(res))
+	}
+	return strings.TrimSpace(res.Stdout), nil
+}
+
 func (c Client) AddAll(dir string) error {
 	res, err := c.Run.Run(dir, "git", "add", "-A")
 	if err != nil {

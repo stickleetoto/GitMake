@@ -1,21 +1,21 @@
-# GitMake v0.5.0
+# GitMake v0.5.2
 
 GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command.
 
-v0.5.0 adds the **Agent Interface**: machine-readable output, built-in AI capability discovery, repository-local AI instructions, and a read-only preview mode for agents.
+v0.5.2 hardens the Agent Interface so LLMs can discover GitMake, author `gitmake.json` from an authoritative schema, review an immutable publish plan, and apply it only if the reviewed inputs are still current.
 
 ```powershell
 gitmake
 ```
 
-## What GitMake owns
+## Scope
 
-GitMake intentionally handles a small workflow well:
+GitMake intentionally owns one small workflow:
 
 ```text
 project ZIP
    ↓
-validate snapshot
+discover + validate
    ↓
 create/update GitHub repository
    ↓
@@ -24,297 +24,241 @@ commit + push
 optional GitHub Release + assets
 ```
 
-It does not try to replace GitHub CLI, Git, pull requests, issues, Actions, or general repository administration.
+It is not a replacement for Git, GitHub CLI, pull requests, issues, Actions, or general repository administration.
 
-## Install on Windows
+## Windows install
 
-Unzip the Windows package and double-click:
-
-```text
-GitMake-Setup.exe
-```
-
-The setup program installs `gitmake.exe` to:
-
-```text
-%LOCALAPPDATA%\Programs\GitMake\gitmake.exe
-```
-
-and registers the directory in the current user's PATH without requiring administrator privileges.
-
-You can also install from the portable binary:
+Unzip the Windows package and double-click `GitMake-Setup.exe`, or run:
 
 ```powershell
 .\gitmake.exe install
 ```
 
-Then open a new terminal and verify:
+GitMake installs per-user to `%LOCALAPPDATA%\Programs\GitMake` and adds that directory to the user PATH. Verify with:
 
 ```powershell
 gitmake --version
 gitmake doctor
 ```
 
-## Requirements
-
-- Git available as `git`
-- GitHub CLI available as `gh`
-- GitHub login completed with `gh auth login`
-- Git `user.name` and `user.email` configured
-
-GitMake itself is a single native executable and does not require Go at runtime.
+Requirements: `git`, GitHub CLI `gh`, `gh auth login`, and a configured Git identity.
 
 ## Daily workflow
 
-Put one project ZIP in a folder and run:
-
 ```powershell
-gitmake
+gitmake                 # auto create/update from the configured/inferred ZIP
+gitmake Project.zip     # explicit source ZIP
+gitmake --dry-run       # preview only
+gitmake --no-release    # update repo but skip configured release
 ```
 
-If `gitmake.json` is missing and there is exactly one ZIP, GitMake creates a safe starter configuration and continues in the same invocation.
-
-For explicit setup:
+## Multi-ZIP discovery
 
 ```powershell
-gitmake init
+gitmake discover --json
 ```
 
-For a specific ZIP:
+Selection priority is deterministic:
 
-```powershell
-gitmake Project_v1.2.3.zip
+```text
+explicit ZIP argument
+→ gitmake.json
+→ one confidently classified source ZIP
+→ otherwise needs_input / user selection
 ```
 
-## Agent Interface
+GitMake uses both archive names and ZIP contents. The JSON report includes confidence, evidence, release-asset candidates, unknown archives, and ambiguity state. If two archives independently look like real source projects, GitMake refuses to guess.
 
-### Discover GitMake from an AI agent
+## AI / Agent Interface
+
+Discover capabilities without prior GitMake knowledge:
 
 ```powershell
 gitmake ai describe --json
 ```
 
-This returns a stable manifest (`gitmake.ai/v1`) describing GitMake's purpose, commands, capabilities, safety boundaries, recommended agent workflow, and exit codes.
-
-Example shape:
-
-```json
-{
-  "schema": "gitmake.ai/v1",
-  "name": "gitmake",
-  "version": "0.5.0",
-  "purpose": "...",
-  "commands": {
-    "preview": {
-      "command": "gitmake --dry-run --read-only --json"
-    },
-    "publish": {
-      "command": "gitmake --json"
-    }
-  },
-  "safety": {
-    "force_push": false,
-    "rewrite_history": false,
-    "delete_repositories": false
-  }
-}
-```
-
-Human-readable discovery is also available:
-
-```powershell
-gitmake ai describe
-```
-
-### Install repository-local AI instructions
-
-Run inside a project:
+Install repository-local agent guidance:
 
 ```powershell
 gitmake ai install
 ```
 
-GitMake creates/updates only its managed section in:
+This manages only its own section in `AGENTS.md` and writes `.gitmake/ai.json`.
 
-```text
-AGENTS.md
-```
-
-and writes the full machine-readable manifest to:
-
-```text
-.gitmake/ai.json
-```
-
-Existing user-authored `AGENTS.md` content is preserved. Re-running the command is idempotent.
-
-### Safe AI preview
-
-For an AI that should inspect the publish plan but not mutate the project or GitHub:
+A safe agent preview is:
 
 ```powershell
 gitmake --dry-run --read-only --json
 ```
 
-`--read-only` blocks `init`, `install`, `upgrade`, `ai install`, and any real publish. A publish in read-only mode is only allowed together with `--dry-run` and an already existing `gitmake.json`.
+When no `gitmake.json` exists, read-only preview may infer safe defaults in memory. It does not persist a config or mutate GitHub.
 
-## JSON output
+## LLM-authored configuration
 
-Use `--json` on normal commands:
+Agents should never guess GitMake's config shape. Read the authoritative local schema first:
 
 ```powershell
-gitmake --json
-gitmake doctor --json
-gitmake help --json
-gitmake --version --json
+gitmake config schema --json
 ```
 
-Publish results use `gitmake.result/v1` and include a structured pipeline summary:
+Then an LLM can supply a complete configuration through stdin:
 
-```json
-{
-  "schema": "gitmake.result/v1",
-  "ok": true,
-  "version": "0.5.0",
-  "command": "publish",
-  "exit_code": 0,
-  "pipeline": {
-    "stage": "REPORT",
-    "mode": "UPDATE",
-    "repository": "owner/project",
-    "branch": "main",
-    "files": 37,
-    "changes": {
-      "added": 2,
-      "modified": 4,
-      "deleted": 1
-    },
-    "dry_run": true,
-    "read_only": true
-  }
-}
+```powershell
+Get-Content generated.json | gitmake config write --stdin --json
 ```
 
-Human console output remains the default when `--json` is not supplied.
+Validate the persisted config:
 
-## Pipeline stages
-
-The Agent Interface exposes a stable high-level execution model:
-
-```text
-DISCOVER
-→ PLAN
-→ PREPARE
-→ VALIDATE
-→ GIT
-→ PUSH
-→ RELEASE
-→ REPORT
+```powershell
+gitmake config validate --json
 ```
 
-Some stages are skipped when they are not applicable, such as `PUSH` during a dry run.
+Patch only selected fields while preserving the rest:
 
-## CLI
-
-```text
-gitmake                     Publish/update current project
-gitmake Project.zip         Publish using a specific source ZIP
-gitmake init [Project.zip]  Create gitmake.json
-gitmake doctor              Diagnose Git/GitHub/install state
-gitmake install             Install GitMake for the current Windows user
-gitmake upgrade             Upgrade from the latest GitMake Release
-gitmake ai describe         Describe capabilities to AI agents
-gitmake ai install          Install repository-local AI guidance
-gitmake help                Show help
+```powershell
+'{"release":{"enabled":true,"tag":"v1.0.0"}}' |
+  gitmake config patch --stdin --json
 ```
 
-Common flags:
+Both write and patch are strictly parsed, reject unknown fields, apply documented defaults, validate before replacing the file, and use a guarded replacement flow. Preview an authored config without writing it with `--dry-run`. `--read-only` blocks config writes/patches.
 
-```text
---dry-run       Preview without modifying GitHub
---read-only     Block mutations; use with --dry-run for agent previews
---json          Emit machine-readable JSON
---no-release    Skip configured Release creation
---verbose       Print external git/gh commands
---yes           Accept safe init defaults
---keep-temp     Keep temporary workspace for debugging
---create-only   Refuse to update an existing repository
---update-only   Refuse to create a missing repository
---config PATH   Use another JSON config
---version       Print GitMake version
+## Plan → Apply approval workflow
+
+For AI or human approval boundaries:
+
+```powershell
+gitmake plan --json
 ```
 
-## Exit codes
+The stored `gitmake.plan/v1` includes:
 
-```text
-0  success
-1  runtime/environment/workflow error
-2  CLI usage error
+- source ZIP SHA-256
+- persisted config SHA-256 when present
+- repository and mode
+- remote base commit for updates
+- exact change counts
+- release asset and notes digests
+- a plan fingerprint
+
+After review:
+
+```powershell
+gitmake apply gm_0123456789abcdef --json
 ```
 
-These exit codes are also declared by `gitmake ai describe --json`.
+Before execution GitMake revalidates the source, config, remote repository state, planned diff, and release inputs. If anything changed after review, apply fails with `PLAN_STALE` instead of publishing a different state than the one approved.
 
-## Configuration
+## Release recovery
 
-Minimal example:
-
-```json
-{
-  "schema_version": 1,
-  "repo": {
-    "name": "ContextDiet",
-    "visibility": "private"
-  },
-  "source": {
-    "zip": "ContextDiet_v1.0.0.zip",
-    "strip_root": true
-  },
-  "git": {
-    "branch": "main",
-    "initial_commit_message": "Initial commit",
-    "commit_message": "Update repository"
-  }
-}
-```
-
-Optional GitHub Release:
+A configured release can use:
 
 ```json
 {
   "release": {
     "enabled": true,
     "tag": "v1.0.0",
-    "title": "ContextDiet v1.0.0",
-    "generate_notes": true,
-    "assets": [
-      "ContextDiet_v1.0.0_Windows_x64.zip",
-      "ContextDiet_v1.0.0_Source.zip"
-    ],
-    "on_existing": "error"
+    "assets": ["App_Windows.zip", "App_Source.zip"],
+    "on_existing": "resume"
   }
 }
 ```
 
-## Safety
+If the release already exists, GitMake compares uploaded asset names and uploads only missing configured assets. This supports recovery from partial release-asset upload failures without recreating the release.
 
-GitMake deliberately does not provide:
-
-- force push
-- Git history rewriting
-- repository deletion
-
-ZIP extraction also rejects path traversal, embedded `.git`, symlinks, Windows-invalid names, case-colliding paths, and extraction-limit violations.
-
-## Build from source
+## Operation history
 
 ```powershell
-go test ./...
-go vet ./...
-go build ./cmd/gitmake
+gitmake history
+gitmake history --json
 ```
 
-Windows build helpers are included as `build.ps1` and `build.bat`.
+GitMake stores recent publish/apply audit records in the user's cache, including success/failure, repository, mode, change counts, plan ID, release tag, and dry-run/read-only state. History failure never causes the requested publish operation itself to fail.
 
-## License
+## Self-upgrade integrity
 
-MIT. See `LICENSE`.
+```powershell
+gitmake upgrade
+```
+
+Starting with v0.5.2 releases, upgrade downloads both the Windows package and the matching `GitMake_vX.Y.Z_SHA256.txt` release asset. The package SHA-256 must match before the replacement executable is staged.
+
+## Machine-readable errors
+
+`--json` publish/apply failures use `gitmake.result/v1` and stable high-level codes such as:
+
+```text
+SOURCE_NOT_FOUND
+SOURCE_AMBIGUOUS
+CONFIG_INVALID
+GH_AUTH_REQUIRED
+GH_CLI_NOT_FOUND
+GIT_NOT_FOUND
+PLAN_NOT_FOUND
+PLAN_STALE
+RELEASE_EXISTS
+UPGRADE_INTEGRITY_FAILED
+```
+
+Errors include stage, recoverability, and a suggested action when applicable.
+
+## Pipeline
+
+```text
+DISCOVER → PLAN → PREPARE → VALIDATE → GIT → PUSH → RELEASE → REPORT
+```
+
+Dry-run/read-only flows omit mutating stages where appropriate.
+
+## CLI
+
+```text
+gitmake                         Publish/update current project
+gitmake Project.zip             Use a specific source ZIP
+gitmake init [Project.zip]      Create gitmake.json
+gitmake doctor                  Diagnose Git/GitHub/install state
+gitmake discover                Classify ZIP candidates
+gitmake plan [Project.zip]      Store a reviewed immutable plan
+gitmake apply <plan_id>         Revalidate and apply the plan
+gitmake history                 Show recent operations
+
+gitmake config schema           Print authoritative config JSON Schema
+gitmake config validate         Validate gitmake.json
+gitmake config write --stdin    Validate + write full config from stdin
+gitmake config patch --stdin    Merge + validate a config patch
+
+gitmake ai describe             Describe capabilities for agents
+gitmake ai install              Install repository-local AI guidance
+
+gitmake install                 Install for current Windows user
+gitmake upgrade                 Upgrade from latest GitMake release
+gitmake help
+gitmake --version
+```
+
+Common flags may appear before or after a positional argument:
+
+```text
+--dry-run
+--read-only
+--json
+--no-release
+--verbose
+--yes
+--keep-temp
+--create-only
+--update-only
+--config PATH
+```
+
+## Safety invariants
+
+- no force push
+- no Git history rewrite
+- no repository deletion
+- ZIP traversal / `.git` injection / symlink / Windows-invalid path defenses
+- read-only publish requires dry-run
+- ambiguous source archives are never guessed
+- release assets are never silently enabled by discovery
+- agent-authored config is strictly schema/semantic validated
+- apply refuses stale reviewed plans
+- self-upgrade verifies SHA-256 before replacement

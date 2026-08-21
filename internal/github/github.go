@@ -134,11 +134,16 @@ func message(res runner.Result) string {
 	return fmt.Sprintf("exit code %d", res.Code)
 }
 
+type ReleaseAsset struct {
+	Name string `json:"name"`
+}
+
 type ReleaseInfo struct {
-	URL          string `json:"url"`
-	TagName      string `json:"tagName"`
-	IsDraft      bool   `json:"isDraft"`
-	IsPrerelease bool   `json:"isPrerelease"`
+	URL          string         `json:"url"`
+	TagName      string         `json:"tagName"`
+	IsDraft      bool           `json:"isDraft"`
+	IsPrerelease bool           `json:"isPrerelease"`
+	Assets       []ReleaseAsset `json:"assets"`
 }
 
 type ReleaseCreateOptions struct {
@@ -155,7 +160,7 @@ type ReleaseCreateOptions struct {
 }
 
 func (c Client) Release(target, tag string) (ReleaseInfo, bool, error) {
-	res, err := c.Run.Run("", "gh", "release", "view", tag, "--repo", target, "--json", "url,tagName,isDraft,isPrerelease")
+	res, err := c.Run.Run("", "gh", "release", "view", tag, "--repo", target, "--json", "url,tagName,isDraft,isPrerelease,assets")
 	if err != nil {
 		return ReleaseInfo{}, false, err
 	}
@@ -216,6 +221,23 @@ func (c Client) CreateRelease(target string, o ReleaseCreateOptions) (string, er
 		}
 	}
 	return url, nil
+}
+
+func (c Client) UploadReleaseAssets(target, tag string, assets []string) error {
+	if len(assets) == 0 {
+		return nil
+	}
+	args := []string{"release", "upload", tag}
+	args = append(args, assets...)
+	args = append(args, "--repo", target)
+	res, err := c.Run.Run("", "gh", args...)
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 {
+		return fmt.Errorf("upload release assets for %s: %s", tag, message(res))
+	}
+	return nil
 }
 
 func (c Client) LatestReleaseTag(target string) (string, error) {

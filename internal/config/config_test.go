@@ -179,3 +179,46 @@ func TestResolveProjectZIPReadOnlyDoesNotRepairConfig(t *testing.T) {
 		t.Fatal("read-only resolver modified config")
 	}
 }
+
+func TestDeriveRepoNameStripsSourceAndVersionSuffix(t *testing.T) {
+	cases := map[string]string{
+		"GitMake_v0.5.2_Source.zip":    "GitMake",
+		"ContextDiet-1.2.3-source.zip": "ContextDiet",
+		"Demo_v2.zip":                  "Demo",
+	}
+	for in, want := range cases {
+		if got := deriveRepoName(in); got != want {
+			t.Fatalf("deriveRepoName(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseBytesStrictAndNormalized(t *testing.T) {
+	c, err := ParseBytes([]byte(`{"repo":{"name":"demo"},"source":{"zip":"demo.zip"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Repo.Visibility != "private" || c.Git.Branch != "main" {
+		t.Fatalf("defaults missing: %#v", c)
+	}
+	if _, err := ParseBytes([]byte(`{"repo":{"name":"demo","unknown":1},"source":{"zip":"demo.zip"}}`)); err == nil {
+		t.Fatal("expected unknown-field rejection")
+	}
+	b, err := MarshalNormalized(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"schema_version": 1`) || !strings.Contains(string(b), `"branch": "main"`) {
+		t.Fatalf("normalized config missing defaults: %s", b)
+	}
+}
+
+func TestSchemaDocumentDeclaresStrictRoot(t *testing.T) {
+	s := SchemaDocument()
+	if s["$id"] != "gitmake.config/v1" {
+		t.Fatalf("unexpected schema id: %#v", s["$id"])
+	}
+	if s["additionalProperties"] != false {
+		t.Fatalf("schema root should reject unknown properties")
+	}
+}

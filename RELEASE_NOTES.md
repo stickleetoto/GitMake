@@ -1,21 +1,16 @@
-# GitMake v0.5.0 — Agent Interface
+# GitMake v0.5.2 — Agent Hardening
 
-v0.5.0 makes GitMake directly discoverable and usable by AI coding agents while keeping the normal human CLI workflow unchanged.
+v0.5.2 makes GitMake safer and easier for terminal-capable AI agents to operate.
 
-## New
+Highlights:
 
-- `gitmake ai describe --json` exposes a stable machine-readable capability manifest.
-- `gitmake ai install` adds a managed GitMake section to `AGENTS.md` and writes `.gitmake/ai.json`.
-- `--json` produces machine-readable command results.
-- `--read-only` provides a non-mutating agent mode.
-- `gitmake --dry-run --read-only --json` is now the recommended safe agent preview workflow.
-- Publish JSON includes pipeline state, repository mode, branch, file count, diff counts, Release metadata, and safety flags.
-- Stable exit codes are declared for agent/tool integrations.
+- LLMs can read the authoritative `gitmake.json` schema with `gitmake config schema --json`.
+- Full configs and partial patches can be supplied through stdin, strictly validated, previewed, and safely written.
+- `gitmake plan` / `gitmake apply` binds user approval to SHA-256 fingerprints and the current remote state.
+- multi-ZIP discovery now exposes confidence and evidence for its source choice.
+- structured error codes help agents recover without parsing prose.
+- `release.on_existing="resume"` recovers missing release assets.
+- `gitmake history` records recent publish/apply outcomes.
+- self-upgrade now verifies the downloaded Windows package against a published SHA-256 checksum before replacement.
 
-## Safety
-
-Read-only mode refuses project/config mutations and real GitHub publishing. GitMake continues to omit force-push, history rewriting, and repository deletion entirely.
-
-## Existing behavior retained
-
-One-command ZIP publishing, automatic repository create/update, Git history preservation, GitHub Release assets, project setup, doctor, per-user installation, and self-upgrade remain supported.
+GitMake still intentionally stays small: it handles project snapshot → repository → optional release publishing and leaves general GitHub administration to Git/GitHub CLI or dedicated tools.

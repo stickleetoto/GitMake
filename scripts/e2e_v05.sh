@@ -12,7 +12,7 @@ python3 - "$TMP/manifest.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['schema']=='gitmake.ai/v1', x
-assert x['name']=='gitmake' and x['version']=='0.5.0', x
+assert x['name']=='gitmake' and x['version']=='0.5.2', x
 assert x['safety']['force_push'] is False
 assert '--dry-run' in x['commands']['preview']['command']
 assert '--read-only' in x['commands']['preview']['command']
@@ -59,7 +59,7 @@ python3 - "$R/out3.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['ok'] is False
-assert 'will not create' in x['error']['message']
+assert 'no project ZIP found' in x['error']['message']
 PY
 test ! -e "$R/gitmake.json"
 
@@ -68,7 +68,7 @@ test ! -e "$R/gitmake.json"
 python3 - "$TMP/version.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
-assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.5.0'}, x
+assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.5.2'}, x
 PY
 
 # 7. Generic JSON surfaces output without contaminating stdout with prose.
