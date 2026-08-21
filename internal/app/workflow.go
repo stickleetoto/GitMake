@@ -63,7 +63,8 @@ func runPlan(o Options) error {
 	if strings.TrimSpace(output) != "" && o.Verbose {
 		fmt.Println("\nPreview output:\n" + strings.TrimSpace(output))
 	}
-	fmt.Printf("\nReview complete. Apply exactly this plan with:\n  gitmake apply %s\n", p.ID)
+	fmt.Printf("\nReview complete. Local CLI apply:\n  gitmake apply %s\n", p.ID)
+	fmt.Printf("For AI/MCP, create a one-shot approval token first:\n  gitmake approve %s\n", p.ID)
 	return nil
 }
 

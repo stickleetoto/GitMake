@@ -1,36 +1,47 @@
-GitMake v0.6.1 - QUICK START
+GitMake v0.7.1 - QUICK START
+============================
 
-INSTALL (recommended)
-1. Unzip the Windows x64 package.
+WINDOWS
+1. Extract GitMake_v0.7.1_Windows_x64.zip.
 2. Double-click GitMake-Setup.exe.
-3. If Claude Code is installed, Setup connects GitMake MCP automatically in read-only mode.
-4. Open a new PowerShell window.
-5. Run:
-     gitmake doctor
-     gitmake ai status
+3. Open a new PowerShell window.
+4. Run: gitmake doctor
+5. If Claude Code is installed, Setup connects read-only MCP automatically.
 
-ONE-COMMAND CLAUDE SETUP
+LINUX / macOS
+1. Extract the package for your platform.
+2. Run: ./gitmake install
+3. Open a new shell if PATH was updated.
+4. Run: gitmake doctor
+
+PROJECT
+1. Put the project source ZIP in a folder.
+2. Run: gitmake init
+3. Review gitmake.json.
+4. Preview safely: gitmake --dry-run --read-only --json
+5. Publish: gitmake
+
+SAFER AI FLOW
+1. gitmake plan --json
+2. Review the plan.
+3. For local human CLI apply: gitmake apply <plan_id>
+4. For MCP/AI apply, the human runs: gitmake approve <plan_id>
+5. Give the one-shot token only to the reviewed apply call.
+
+AI / MCP
+Claude Code one-click:
   gitmake ai setup
 
-Enable reviewed AI write tools only when you want them:
-  gitmake ai setup --write
+Generic MCP descriptor:
+  gitmake ai setup --client generic --json
 
-Check or remove the integration:
+Status:
   gitmake ai status
-  gitmake ai remove
 
-FIRST PROJECT
-1. Put the project ZIP in a folder.
-2. Open PowerShell in that folder.
-3. Run: gitmake init
-4. Run: gitmake
-
-AI / AGENT FLOW
-  gitmake ai describe --json
-  gitmake --dry-run --read-only --json
-  gitmake plan --json
-  gitmake apply <plan_id> --json   (after approval)
-
-RAW MCP (advanced / non-Claude clients)
-  gitmake mcp
-  gitmake mcp --allow-write
+SECURITY DEFAULTS
+- managed sync preserves remote-only files
+- .github/** and .gitmake/** protected
+- likely secrets block publish
+- large direct-Git files block unless safely handled by LFS
+- required-PR protected branches are not bypassed
+- no force push / repo delete / history rewrite

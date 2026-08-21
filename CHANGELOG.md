@@ -1,4 +1,22 @@
+## v0.7.1
+
+- Fix self-publish false positives caused by secret-scanner unit-test fixtures containing literal private-key/token signatures.
+- Add a regression test so scanner test fixtures cannot silently reintroduce signatures that block GitMake source publication.
+
 # Changelog
+
+## v0.7.1 — Safety Gate + Cross-Agent Hardening
+
+- Added **managed sync** with `.gitmake/managed.json`: GitMake preserves remote-only files and deletes only files it previously managed; `.github/**` and `.gitmake/**` are protected by default.
+- Added security preflight for likely secret files/content, large direct-Git files, and Git LFS requirements.
+- Added `sync` and `security` configuration sections while keeping config schema version 1 compatible.
+- Added `gitmake approve <plan_id>` and one-shot expiring approval tokens. MCP `gitmake_apply` now requires a human-generated approval token in addition to the reviewed plan ID.
+- Added `gitmake inspect` / MCP project inspection and in-memory config suggestion so agents can remain inside the GitMake tool surface.
+- Hardened multi-ZIP selection: content evidence is weighted over names, obvious binary archives are not auto-selected as source, and close candidates require input.
+- Added GitHub preflight for required-PR branch protection, pre-existing bare release tags, stale remote state, and large-file/LFS constraints.
+- Added generic MCP registration output with `gitmake ai setup --client generic --json`.
+- Added Linux/macOS per-user installation to `~/.local/bin` and PATH management.
+- Preserved all existing safety invariants: no force push, history rewrite, or repository deletion.
 
 ## v0.6.1 — One-click AI Setup
 

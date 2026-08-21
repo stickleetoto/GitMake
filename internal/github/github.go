@@ -3,6 +3,7 @@ package github
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -81,6 +82,52 @@ func (c Client) Repo(owner, name string) (RepoInfo, bool, error) {
 		return RepoInfo{}, false, fmt.Errorf("parse gh repo view output: %w", err)
 	}
 	return info, true, nil
+}
+
+type BranchPolicy struct {
+	Known      bool `json:"known"`
+	Protected  bool `json:"protected"`
+	RequiresPR bool `json:"requires_pull_request"`
+}
+
+func (c Client) BranchPolicy(target, branch string) (BranchPolicy, error) {
+	endpoint := fmt.Sprintf("repos/%s/branches/%s/protection", target, url.PathEscape(branch))
+	res, err := c.Run.Run("", "gh", "api", endpoint)
+	if err != nil {
+		return BranchPolicy{}, err
+	}
+	if res.Code != 0 {
+		combined := res.Stdout + "\n" + res.Stderr
+		if notFoundRE.MatchString(combined) {
+			return BranchPolicy{Known: true, Protected: false}, nil
+		}
+		if strings.Contains(combined, "403") || strings.Contains(strings.ToLower(combined), "forbidden") {
+			return BranchPolicy{Known: false}, nil
+		}
+		return BranchPolicy{}, fmt.Errorf("inspect branch protection for %s:%s: %s", target, branch, message(res))
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(res.Stdout), &raw); err != nil {
+		return BranchPolicy{}, fmt.Errorf("parse branch protection: %w", err)
+	}
+	_, requires := raw["required_pull_request_reviews"]
+	return BranchPolicy{Known: true, Protected: true, RequiresPR: requires && raw["required_pull_request_reviews"] != nil}, nil
+}
+
+func (c Client) TagExists(target, tag string) (bool, error) {
+	endpoint := fmt.Sprintf("repos/%s/git/ref/tags/%s", target, url.PathEscape(tag))
+	res, err := c.Run.Run("", "gh", "api", endpoint)
+	if err != nil {
+		return false, err
+	}
+	if res.Code == 0 {
+		return true, nil
+	}
+	combined := res.Stdout + "\n" + res.Stderr
+	if notFoundRE.MatchString(combined) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check tag %s in %s: %s", tag, target, message(res))
 }
 
 func (c Client) Clone(target, dest string) error {

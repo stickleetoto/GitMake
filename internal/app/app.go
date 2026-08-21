@@ -22,7 +22,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.6.1"
+const Version = "0.7.1"
 
 type Options struct {
 	Command       string
@@ -43,6 +43,8 @@ type Options struct {
 	Stdin         bool
 	MCPAllowWrite bool
 	AIWrite       bool
+	ApprovalToken string
+	AIClient      string
 	State         *PipelineState
 }
 
@@ -68,7 +70,7 @@ func Main(args []string) int {
 
 	// AI/config/discovery subcommands own their JSON schema because agents consume
 	// these files directly as capability/installation metadata.
-	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "ai-setup" || opts.Command == "ai-status" || opts.Command == "ai-remove" || opts.Command == "discover" || opts.Command == "plan" || opts.Command == "history" || opts.Command == "config") {
+	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "ai-setup" || opts.Command == "ai-status" || opts.Command == "ai-remove" || opts.Command == "discover" || opts.Command == "inspect" || opts.Command == "plan" || opts.Command == "approve" || opts.Command == "history" || opts.Command == "config") {
 		if err := Run(opts); err != nil {
 			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: classifyMachineError(err, opts.State)})
 			return 1
@@ -172,7 +174,7 @@ func parseArgs(args []string) (Options, error) {
 			args = args[2:]
 		} else {
 			switch args[0] {
-			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "history", "mcp":
+			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "approve", "inspect", "history", "mcp":
 				o.Command = args[0]
 				args = args[1:]
 			}
@@ -199,7 +201,9 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.ReadOnly, "read-only", false, "block project/GitHub mutations; publish requires --dry-run")
 	fs.BoolVar(&o.Stdin, "stdin", false, "read config JSON or patch JSON from standard input")
 	fs.BoolVar(&o.MCPAllowWrite, "allow-write", false, "expose mutating tools in MCP mode")
-	fs.BoolVar(&o.AIWrite, "write", false, "configure Claude Code with reviewed GitMake write tools")
+	fs.BoolVar(&o.AIWrite, "write", false, "configure an AI client with reviewed GitMake write tools")
+	fs.StringVar(&o.ApprovalToken, "approval", "", "one-shot approval token for MCP plan apply")
+	fs.StringVar(&o.AIClient, "client", "claude", "AI client for setup/status/remove: claude or generic")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
@@ -213,6 +217,14 @@ func parseArgs(args []string) (Options, error) {
 	if o.MCPAllowWrite && o.Command != "mcp" {
 		return Options{}, errors.New("--allow-write is only valid with `gitmake mcp`")
 	}
+	if strings.HasPrefix(o.Command, "ai-") {
+		o.AIClient = strings.ToLower(strings.TrimSpace(o.AIClient))
+		switch o.AIClient {
+		case "claude", "generic":
+		default:
+			return Options{}, fmt.Errorf("--client must be claude or generic")
+		}
+	}
 
 	switch o.Command {
 	case "publish", "plan":
@@ -222,9 +234,9 @@ func parseArgs(args []string) (Options, error) {
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
 		}
-	case "apply":
+	case "apply", "approve":
 		if len(rest) != 1 {
-			return Options{}, fmt.Errorf("usage: gitmake apply <plan_id>")
+			return Options{}, fmt.Errorf("usage: gitmake %s <plan_id>", o.Command)
 		}
 		o.PlanID = rest[0]
 	case "init":
@@ -241,7 +253,7 @@ func parseArgs(args []string) (Options, error) {
 		if (o.ConfigAction == "write" || o.ConfigAction == "patch") && !o.Stdin {
 			return Options{}, fmt.Errorf("gitmake config %s requires --stdin", o.ConfigAction)
 		}
-	case "doctor", "install", "upgrade", "help", "discover", "history", "mcp", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
+	case "doctor", "install", "upgrade", "help", "discover", "inspect", "history", "mcp", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
 		}
@@ -262,7 +274,7 @@ func normalizeFlagOrder(args []string) []string {
 		}
 		if strings.HasPrefix(a, "-") {
 			flags = append(flags, a)
-			if a == "--config" || a == "-config" {
+			if a == "--config" || a == "-config" || a == "--client" || a == "-client" || a == "--approval" || a == "-approval" {
 				if i+1 < len(args) {
 					i++
 					flags = append(flags, args[i])
@@ -278,7 +290,7 @@ func normalizeFlagOrder(args []string) []string {
 func Run(o Options) error {
 	if o.ReadOnly {
 		switch o.Command {
-		case "install", "upgrade", "init", "ai-install", "ai-setup", "ai-remove", "apply":
+		case "install", "upgrade", "init", "ai-install", "ai-setup", "ai-remove", "apply", "approve":
 			return fmt.Errorf("read-only mode blocks `gitmake %s`", strings.ReplaceAll(o.Command, "ai-", "ai "))
 		case "config":
 			if o.ConfigAction == "write" || o.ConfigAction == "patch" {
@@ -302,6 +314,10 @@ func Run(o Options) error {
 		return runPlan(o)
 	case "apply":
 		return runApply(o)
+	case "approve":
+		return runApprove(o)
+	case "inspect":
+		return runInspect(o)
 	case "history":
 		return runHistory(o)
 	case "mcp":
@@ -340,19 +356,21 @@ Usage:
   gitmake discover            Classify project/release ZIPs without changing files
   gitmake plan [Project.zip]  Create an immutable reviewed publish plan
   gitmake apply <plan_id>     Revalidate and apply a previously reviewed plan
+  gitmake approve <plan_id>   Create a one-shot MCP approval token
+  gitmake inspect             Inspect project/config/security state without mutation
   gitmake history             Show recent GitMake publish/apply operations
   gitmake mcp                 Run the local MCP server (read-only tools by default)
   gitmake config schema       Print the machine-readable config schema
   gitmake config validate     Validate gitmake.json
   gitmake config write --stdin  Validate and write config JSON from stdin
   gitmake config patch --stdin  Merge a JSON patch into gitmake.json
-  gitmake install             Install GitMake for the current Windows user
+  gitmake install             Install GitMake for the current user
   gitmake upgrade             Upgrade GitMake from its latest GitHub Release
   gitmake ai describe         Explain GitMake capabilities to AI agents
   gitmake ai install          Install managed AGENTS.md + .gitmake/ai.json guidance
-  gitmake ai setup            Connect GitMake MCP to Claude Code (read-only by default)
-  gitmake ai status           Show Claude Code / GitMake MCP connection status
-  gitmake ai remove           Remove the user-scoped Claude Code MCP registration
+  gitmake ai setup            Connect GitMake MCP (Claude by default; read-only)
+  gitmake ai status           Show AI client / GitMake MCP connection status
+  gitmake ai remove           Remove GitMake-managed AI registration
 
 Common options:
   --dry-run       Preview without changing GitHub
@@ -362,11 +380,15 @@ Common options:
   --json          Emit machine-readable JSON
   --read-only     Block mutations; combine with --dry-run for safe AI previews
   --allow-write   In MCP mode, expose config write/patch and approved plan apply tools
-  --write         With gitmake ai setup, enable reviewed AI write tools
+  --write         With gitmake ai setup, enable config writes + approved plan apply
+  --client NAME   AI setup client: claude or generic
   --version       Print GitMake version
 
 Safety:
   GitMake never force-pushes, rewrites history, or deletes repositories.
+  Managed sync preserves remote-only files and protected paths by default.
+  Secret/large-file/LFS/branch/tag preflight runs before mutation.
+  MCP apply requires a one-shot human approval token.
 `, Version)
 }
 
@@ -879,9 +901,25 @@ func runPublish(o Options) error {
 	}
 	if o.State != nil {
 		o.State.Files = files
+		o.State.enter("SECURITY")
+	}
+	securityReport, err := enforceSecurity(snapshot, cfg, git.HasLFS())
+	if o.State != nil {
+		o.State.Security = securityStateFromReport(securityReport)
+	}
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
 		o.State.enter("VALIDATE")
 	}
 	fmt.Printf("✓ Source validated      %d files\n", files)
+	if securityReport.SecretScan {
+		fmt.Printf("✓ Security scan         %d files · no secrets\n", securityReport.ScannedFiles)
+	}
+	if len(securityReport.LargeFiles) > 0 {
+		fmt.Printf("· Large files           %d reviewed\n", len(securityReport.LargeFiles))
+	}
 
 	if exists {
 		if err := updateFlow(o, cfg, target, repoInfo.URL, repoInfo.DefaultBranch(), snapshot, work, git, gh, release); err != nil {
@@ -900,6 +938,13 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	if o.State != nil {
 		o.State.enter("GIT")
 		o.State.Branch = cfg.Git.Branch
+	}
+	syncResult, err := syncer.PrepareCreateSnapshot(snapshot)
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
+		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, FirstAdopt: syncResult.FirstAdopt}
 	}
 	if err := git.Init(snapshot, cfg.Git.Branch); err != nil {
 		return err
@@ -996,8 +1041,28 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	if fallback {
 		fmt.Printf("· Branch fallback       %s → %s\n", cfg.Git.Branch, branch)
 	}
-	if err := syncer.MirrorSnapshot(snapshot, repoDir); err != nil {
+	policy, err := gh.BranchPolicy(target, branch)
+	if err != nil {
 		return err
+	}
+	if policy.RequiresPR {
+		return fmt.Errorf("branch %s in %s requires pull requests; GitMake direct-push workflow will not bypass branch protection", branch, target)
+	}
+	if !policy.Known {
+		fmt.Println("· Branch protection     could not be inspected; normal non-force push remains enforced")
+	}
+	syncResult, err := syncer.SyncSnapshot(snapshot, repoDir, cfg.Sync.Mode, cfg.Sync.ProtectedPaths)
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
+		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, FirstAdopt: syncResult.FirstAdopt, Deleted: syncResult.Deleted, Preserved: syncResult.Preserved}
+	}
+	if syncResult.FirstAdopt {
+		fmt.Println("· Managed sync          first adoption · remote-only files preserved")
+	}
+	if len(syncResult.Preserved) > 0 {
+		fmt.Printf("· Protected paths       %d preserved\n", len(syncResult.Preserved))
 	}
 	if err := git.AddAll(repoDir); err != nil {
 		return err
@@ -1099,7 +1164,15 @@ func diffCounts(diff string) (added, modified, deleted int) {
 		if line == "" {
 			continue
 		}
-		status := strings.SplitN(line, "\t", 2)[0]
+		parts := strings.Split(line, "\t")
+		status := parts[0]
+		path := ""
+		if len(parts) > 1 {
+			path = filepath.ToSlash(parts[len(parts)-1])
+		}
+		if strings.EqualFold(path, ".gitmake/managed.json") {
+			continue // internal ownership metadata is not a user project change
+		}
 		if strings.HasPrefix(status, "A") {
 			added++
 		} else if strings.HasPrefix(status, "D") {

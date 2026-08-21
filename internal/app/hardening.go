@@ -36,6 +36,34 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 		out.Stage = state.Stage
 	}
 	switch {
+	case strings.Contains(lower, "potential secrets detected"):
+		out.Code = "SECRET_DETECTED"
+		out.Recoverable = true
+		out.SuggestedAction = "Remove the secret from the source ZIP or explicitly allow a safe fixture path in security.allow_secret_paths."
+	case strings.Contains(lower, "large file") && strings.Contains(lower, "safe direct-git threshold"):
+		out.Code = "LARGE_FILE_BLOCKED"
+		out.Recoverable = true
+		out.SuggestedAction = "Reduce the file size or configure Git LFS with .gitattributes."
+	case strings.Contains(lower, "marked for git lfs"):
+		out.Code = "GIT_LFS_REQUIRED"
+		out.Recoverable = true
+		out.SuggestedAction = "Install git-lfs and retry."
+	case strings.Contains(lower, "requires pull requests") || strings.Contains(lower, "branch protection") && strings.Contains(lower, "will not bypass"):
+		out.Code = "BRANCH_REQUIRES_PR"
+		out.Recoverable = false
+		out.SuggestedAction = "Use the repository's pull-request workflow; GitMake does not bypass protected branches."
+	case strings.Contains(lower, "release tag") && strings.Contains(lower, "already exists"):
+		out.Code = "TAG_CONFLICT"
+		out.Recoverable = true
+		out.SuggestedAction = "Choose a new release tag or review the existing tag manually."
+	case strings.Contains(lower, "non-fast-forward") || strings.Contains(lower, "fetch first") || strings.Contains(lower, "rejected") && strings.Contains(lower, "push"):
+		out.Code = "REMOTE_MOVED"
+		out.Recoverable = true
+		out.SuggestedAction = "Create a fresh GitMake plan; the remote branch changed."
+	case strings.Contains(lower, "approval token") || strings.Contains(lower, "one-shot approval"):
+		out.Code = "APPROVAL_REQUIRED"
+		out.Recoverable = true
+		out.SuggestedAction = "Run `gitmake approve <plan_id>` and provide the one-shot token to the MCP apply tool."
 	case strings.Contains(lower, "multiple source candidates") || strings.Contains(lower, "multiple zip"):
 		out.Code = "SOURCE_AMBIGUOUS"
 		out.Recoverable = true

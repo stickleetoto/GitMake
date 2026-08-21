@@ -29,6 +29,38 @@ type PipelineState struct {
 	ReadOnly        bool            `json:"read_only,omitempty"`
 	Config          *ConfigState    `json:"config,omitempty"`
 	Discovery       *DiscoveryState `json:"discovery,omitempty"`
+	Security        *SecurityState  `json:"security,omitempty"`
+	Sync            *SyncState      `json:"sync,omitempty"`
+}
+
+type SecurityState struct {
+	SecretScan   bool              `json:"secret_scan"`
+	ScannedFiles int               `json:"scanned_files"`
+	Findings     []SecurityFinding `json:"findings,omitempty"`
+	LargeFiles   []LargeFileState  `json:"large_files,omitempty"`
+	LFSRequired  bool              `json:"lfs_required"`
+	Blocking     bool              `json:"blocking"`
+}
+
+type SecurityFinding struct {
+	Path   string `json:"path"`
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+}
+
+type LargeFileState struct {
+	Path      string `json:"path"`
+	Bytes     int64  `json:"bytes"`
+	LFSMarked bool   `json:"lfs_marked"`
+	Blocking  bool   `json:"blocking"`
+}
+
+type SyncState struct {
+	Mode         string   `json:"mode"`
+	ManagedFiles int      `json:"managed_files"`
+	FirstAdopt   bool     `json:"first_adopt"`
+	Deleted      []string `json:"deleted,omitempty"`
+	Preserved    []string `json:"preserved,omitempty"`
 }
 
 type ConfigState struct {

@@ -1,225 +1,269 @@
-# GitMake v0.6.1
+# GitMake v0.7.1
 
-GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command.
-
-v0.6.1 makes the MCP layer one-click for Claude Code: `gitmake ai setup` detects Claude, registers the user-scoped GitMake MCP server, keeps it read-only by default, and verifies the resulting connection. The raw MCP server remains available for other clients.
-
-```powershell
-gitmake
-```
-
-## Scope
-
-GitMake intentionally owns one small workflow:
+GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
 ```text
 project ZIP
    ↓
-discover + validate
+discover + security preflight
    ↓
-create/update GitHub repository
+reviewed plan
    ↓
-commit + push
+create/update repository
    ↓
-optional GitHub Release + assets
+commit + normal push
+   ↓
+optional Release + assets
 ```
 
-It is not a replacement for Git, GitHub CLI, pull requests, issues, Actions, or general repository administration.
+v0.7.1 focuses on safety for real repositories and AI agents: managed file ownership, secret/large-file scanning, one-shot human approval for MCP apply, conservative multi-ZIP discovery, GitHub branch/tag preflight, and cross-platform/generic MCP support.
 
-## Windows install
+## Install
 
-Unzip the Windows package and double-click `GitMake-Setup.exe`, or run:
+### Windows
+
+Extract the Windows package and double-click `GitMake-Setup.exe`, or:
 
 ```powershell
 .\gitmake.exe install
 ```
 
-GitMake installs per-user to `%LOCALAPPDATA%\Programs\GitMake` and adds that directory to the user PATH. Verify with:
+GitMake installs per-user to `%LOCALAPPDATA%\Programs\GitMake` and adds that directory to the user PATH.
 
-```powershell
+### Linux / macOS
+
+Extract the platform package and run:
+
+```bash
+./gitmake install
+```
+
+GitMake installs to `~/.local/bin/gitmake` and idempotently manages the PATH snippet in the appropriate user shell profile.
+
+Verify:
+
+```text
 gitmake --version
 gitmake doctor
 ```
 
-Requirements: `git`, GitHub CLI `gh`, `gh auth login`, and a configured Git identity.
+Requirements for publishing: Git, GitHub CLI `gh`, `gh auth login`, and a configured Git identity.
 
 ## Daily workflow
 
-```powershell
-gitmake                 # auto create/update from the configured/inferred ZIP
-gitmake Project.zip     # explicit source ZIP
-gitmake --dry-run       # preview only
-gitmake --no-release    # update repo but skip configured release
+```text
+gitmake                         auto create/update current project
+gitmake Project.zip             explicit source ZIP
+gitmake --dry-run               preview only
+gitmake --dry-run --read-only --json
+gitmake --no-release            skip configured release
 ```
+
+## Managed sync: safe by default
+
+The default `sync.mode` is `managed`.
+
+On first adoption of an existing repository GitMake preserves files that exist only in the repository. It records only the source files it owns in `.gitmake/managed.json`. On later updates, a file is deleted only if GitMake previously managed it and the new source ZIP no longer contains it.
+
+Default protected paths:
+
+```text
+.github/**
+.gitmake/**
+```
+
+This prevents a source ZIP from accidentally erasing repository-only workflows/configuration. Exact legacy mirror behavior is still available with:
+
+```json
+{
+  "sync": {
+    "mode": "snapshot"
+  }
+}
+```
+
+Protected paths remain protected in snapshot mode.
+
+## Security preflight
+
+Before commit/push/release mutation, GitMake checks for:
+
+- high-risk secret paths such as real `.env` files and private key files
+- common private-key, GitHub-token, and AWS credential patterns
+- oversized direct-Git files
+- Git LFS markings and `git lfs` availability
+- required-PR branch protection
+- pre-existing bare tags that would make a release ambiguous
+- stale remote state when applying a reviewed plan
+
+Example configuration:
+
+```json
+{
+  "security": {
+    "secret_scan": true,
+    "allow_secret_paths": [],
+    "warn_file_bytes": 52428800,
+    "max_git_file_bytes": 99614720
+  }
+}
+```
+
+GitMake never force-pushes to escape a race or branch policy.
 
 ## Multi-ZIP discovery
 
-```powershell
+```text
 gitmake discover --json
 ```
 
-Selection priority is deterministic:
+Selection priority:
 
 ```text
 explicit ZIP argument
 → gitmake.json
 → one confidently classified source ZIP
-→ otherwise needs_input / user selection
+→ otherwise needs_input
 ```
 
-GitMake uses both archive names and ZIP contents. The JSON report includes confidence, evidence, release-asset candidates, unknown archives, and ambiguity state. If two archives independently look like real source projects, GitMake refuses to guess.
+GitMake uses ZIP contents as primary evidence and names as supporting evidence. An obvious binary/release archive is not silently selected as project source. Close or competing source candidates require input.
 
-## AI / Agent Interface
+## Configuration for humans and LLMs
 
-Discover capabilities without prior GitMake knowledge:
-
-```powershell
-gitmake ai describe --json
-```
-
-Install repository-local agent guidance:
-
-```powershell
-gitmake ai install
-```
-
-This manages only its own section in `AGENTS.md` and writes `.gitmake/ai.json`.
-
-A safe agent preview is:
-
-```powershell
-gitmake --dry-run --read-only --json
-```
-
-When no `gitmake.json` exists, read-only preview may infer safe defaults in memory. It does not persist a config or mutate GitHub.
-
-
-## Claude Code: one-command AI setup
-
-Recommended:
-
-```powershell
-gitmake ai setup
-```
-
-GitMake detects Claude Code, ensures a stable GitMake executable path on Windows, registers the user-scoped stdio MCP server, and verifies the registration. Access is read-only by default.
-
-```powershell
-gitmake ai status
-gitmake ai remove
-```
-
-To deliberately enable the guarded mutation surface:
-
-```powershell
-gitmake ai setup --write
-```
-
-`--write` requires confirmation unless `--yes` is explicitly supplied. GitMake only manages its own user-scoped `gitmake` registration and refuses to replace/remove a same-named project/local server.
-
-`GitMake-Setup.exe` also performs the read-only Claude connection automatically when Claude Code is detected.
-
-## MCP integration (advanced / other clients)
-
-Run GitMake as a local MCP stdio server directly:
-
-```powershell
-gitmake mcp
-```
-
-The default MCP toolset is intentionally read-only. It exposes:
+Never guess the config shape:
 
 ```text
-gitmake_describe
-gitmake_doctor
-gitmake_discover
-gitmake_config_schema
-gitmake_config_validate
-gitmake_preview
-gitmake_plan
-gitmake_history
-```
-
-To intentionally expose the guarded mutation surface:
-
-```powershell
-gitmake mcp --allow-write
-```
-
-This adds only:
-
-```text
-gitmake_config_write
-gitmake_config_patch
-gitmake_apply
-```
-
-There is no MCP force-push, repository deletion, history rewrite, or direct unreviewed publish tool. `gitmake_apply` requires a previously reviewed plan and still rejects stale source/config/remote state.
-
-Claude Code users normally should use `gitmake ai setup` instead of composing raw MCP registration commands.
-
-GitMake also honors `GITMAKE_PROJECT_DIR` as an MCP project-root override. When launched by Claude Code, `CLAUDE_PROJECT_DIR` is used automatically when no explicit `project_dir` tool argument is supplied.
-
-The stdio server accepts modern MCP clients that call `tools/list` directly and also implements the legacy `initialize` handshake for compatibility.
-
-## LLM-authored configuration
-
-Agents should never guess GitMake's config shape. Read the authoritative local schema first:
-
-```powershell
 gitmake config schema --json
 ```
 
-Then an LLM can supply a complete configuration through stdin:
+Validate:
 
-```powershell
-Get-Content generated.json | gitmake config write --stdin --json
-```
-
-Validate the persisted config:
-
-```powershell
+```text
 gitmake config validate --json
 ```
 
-Patch only selected fields while preserving the rest:
+Agents can safely author through GitMake itself:
 
-```powershell
-'{"release":{"enabled":true,"tag":"v1.0.0"}}' |
-  gitmake config patch --stdin --json
+```text
+gitmake config write --stdin --json
+gitmake config patch --stdin --json
 ```
 
-Both write and patch are strictly parsed, reject unknown fields, apply documented defaults, validate before replacing the file, and use a guarded replacement flow. Preview an authored config without writing it with `--dry-run`. `--read-only` blocks config writes/patches.
+Unknown fields are rejected and the complete normalized config is validated before replacement. `--dry-run` previews writes; `--read-only` blocks them.
 
-## Plan → Apply approval workflow
+A typical v0.7 config:
 
-For AI or human approval boundaries:
+```json
+{
+  "schema_version": 1,
+  "repo": {
+    "name": "Demo",
+    "visibility": "private"
+  },
+  "source": {
+    "zip": "Demo_Source.zip",
+    "strip_root": true
+  },
+  "git": {
+    "branch": "main"
+  },
+  "sync": {
+    "mode": "managed",
+    "protected_paths": [".github/**", ".gitmake/**"]
+  },
+  "security": {
+    "secret_scan": true
+  },
+  "release": {
+    "enabled": false
+  }
+}
+```
 
-```powershell
+## Plan → Apply
+
+Create a reviewed immutable plan:
+
+```text
 gitmake plan --json
 ```
 
-The stored `gitmake.plan/v1` includes:
+A plan binds source/config digests, target repository, remote baseline, exact user-visible change counts, release inputs, and a fingerprint.
 
-- source ZIP SHA-256
-- persisted config SHA-256 when present
-- repository and mode
-- remote base commit for updates
-- exact change counts
-- release asset and notes digests
-- a plan fingerprint
+For a local human-controlled CLI apply:
 
-After review:
-
-```powershell
+```text
 gitmake apply gm_0123456789abcdef --json
 ```
 
-Before execution GitMake revalidates the source, config, remote repository state, planned diff, and release inputs. If anything changed after review, apply fails with `PLAN_STALE` instead of publishing a different state than the one approved.
+If source/config/remote/release state changed since review, apply fails with `PLAN_STALE` rather than publishing a different state.
+
+## One-shot approval for AI/MCP apply
+
+MCP write access is no longer enough by itself to publish a reviewed plan. A human must create a short-lived, plan-bound token from an interactive terminal:
+
+```text
+gitmake approve gm_0123456789abcdef
+```
+
+The token:
+
+- cannot be minted through MCP
+- is bound to one plan
+- expires
+- is consumed after successful apply
+- rejects replay
+
+The agent sends both `plan_id` and `approval_token` to `gitmake_apply`.
+
+## AI discovery
+
+```text
+gitmake ai describe --json
+gitmake ai install
+```
+
+The manifest tells agents to use GitMake's authoritative config schema/write tools, run security-aware preview/plan first, stop on ambiguity/security/branch/tag errors, and never manufacture approval tokens.
+
+## Claude Code one-click MCP
+
+```text
+gitmake ai setup
+gitmake ai status
+```
+
+Claude Code is detected and the user-scoped stdio MCP registration is created read-only by default.
+
+To expose guarded config write/patch and approved-plan apply:
+
+```text
+gitmake ai setup --write
+```
+
+Actual apply still requires the one-shot human approval token above.
+
+## Generic MCP clients
+
+GitMake does not guess unknown client config formats. Ask it for a portable stdio descriptor:
+
+```text
+gitmake ai setup --client generic --json
+```
+
+Then register that descriptor using the client's normal MCP configuration mechanism.
+
+Raw server:
+
+```text
+gitmake mcp
+gitmake mcp --allow-write
+```
+
+Read-only MCP tools include project inspection, describe, doctor, discovery, config schema/validation/suggestion, preview, plan, and history. Guarded write mode adds config write/patch and approved apply. There is no MCP force-push, repo-delete, history-rewrite, approval-minting, or unreviewed direct-publish tool.
+
+Project-root resolution supports an explicit tool `project_dir`, `GITMAKE_PROJECT_DIR`, Claude's `CLAUDE_PROJECT_DIR`, then current working directory.
 
 ## Release recovery
-
-A configured release can use:
 
 ```json
 {
@@ -232,51 +276,45 @@ A configured release can use:
 }
 ```
 
-If the release already exists, GitMake compares uploaded asset names and uploads only missing configured assets. This supports recovery from partial release-asset upload failures without recreating the release.
+When a release already exists, `resume` uploads only missing configured assets. A bare pre-existing tag without the reviewed release is treated as a conflict rather than silently reused.
 
-## Operation history
+## History
 
-```powershell
+```text
 gitmake history
 gitmake history --json
 ```
 
-GitMake stores recent publish/apply audit records in the user's cache, including success/failure, repository, mode, change counts, plan ID, release tag, and dry-run/read-only state. History failure never causes the requested publish operation itself to fail.
+Recent publish/apply audit records include success/failure, repository, mode, change counts, plan ID, release tag, and dry-run/read-only state.
 
 ## Self-upgrade integrity
 
-```powershell
+```text
 gitmake upgrade
 ```
 
-Starting with v0.5.2 releases, upgrade downloads both the Windows package and the matching `GitMake_vX.Y.Z_SHA256.txt` release asset. The package SHA-256 must match before the replacement executable is staged.
+Release packages are checked against the matching SHA-256 asset before replacement is staged.
 
 ## Machine-readable errors
 
-`--json` publish/apply failures use `gitmake.result/v1` and stable high-level codes such as:
+`--json` failures use stable high-level codes. v0.7 includes codes for security and GitHub safety boundaries such as:
 
 ```text
 SOURCE_NOT_FOUND
 SOURCE_AMBIGUOUS
 CONFIG_INVALID
-GH_AUTH_REQUIRED
-GH_CLI_NOT_FOUND
-GIT_NOT_FOUND
+SECRET_DETECTED
+LARGE_FILE_BLOCKED
+GIT_LFS_REQUIRED
+BRANCH_REQUIRES_PR
+TAG_CONFLICT
+REMOTE_MOVED
 PLAN_NOT_FOUND
 PLAN_STALE
+APPROVAL_REQUIRED
 RELEASE_EXISTS
 UPGRADE_INTEGRITY_FAILED
 ```
-
-Errors include stage, recoverability, and a suggested action when applicable.
-
-## Pipeline
-
-```text
-DISCOVER → PLAN → PREPARE → VALIDATE → GIT → PUSH → RELEASE → REPORT
-```
-
-Dry-run/read-only flows omit mutating stages where appropriate.
 
 ## CLI
 
@@ -284,46 +322,33 @@ Dry-run/read-only flows omit mutating stages where appropriate.
 gitmake                         Publish/update current project
 gitmake Project.zip             Use a specific source ZIP
 gitmake init [Project.zip]      Create gitmake.json
-gitmake doctor                  Diagnose Git/GitHub/install state
+gitmake doctor                  Diagnose environment/install state
+gitmake inspect                 Inspect project/config state
 gitmake discover                Classify ZIP candidates
-gitmake plan [Project.zip]      Store a reviewed immutable plan
-gitmake apply <plan_id>         Revalidate and apply the plan
-gitmake history                 Show recent operations
+gitmake plan [Project.zip]      Store reviewed plan
+gitmake approve <plan_id>       Human-mint one-shot MCP approval
+gitmake apply <plan_id>         Revalidate + locally apply plan
+gitmake history                 Read audit history
 
-gitmake config schema           Print authoritative config JSON Schema
+gitmake config schema           Authoritative JSON Schema
 gitmake config validate         Validate gitmake.json
-gitmake config write --stdin    Validate + write full config from stdin
-gitmake config patch --stdin    Merge + validate a config patch
+gitmake config write --stdin    Validate + atomically write config
+gitmake config patch --stdin    Merge + validate config patch
 
-gitmake ai describe             Describe capabilities for agents
-gitmake ai install              Install repository-local AI guidance
-gitmake ai setup                Auto-connect Claude Code read-only
-gitmake ai setup --write        Enable reviewed write tools after confirmation
-gitmake ai status               Show Claude/MCP status
-gitmake ai remove               Remove GitMake Claude MCP registration
-gitmake mcp                     Run read-only MCP stdio server manually
-gitmake mcp --allow-write       Expose guarded config/apply MCP tools manually
+gitmake ai describe             Agent capability manifest
+gitmake ai install              Managed AGENTS.md guidance
+gitmake ai setup                One-click Claude read-only MCP
+gitmake ai setup --write        Guarded write MCP
+gitmake ai setup --client generic --json
+gitmake ai status
+gitmake ai remove
+gitmake mcp
+gitmake mcp --allow-write
 
-gitmake install                 Install for current Windows user
-gitmake upgrade                 Upgrade from latest GitMake release
+gitmake install
+gitmake upgrade
 gitmake help
 gitmake --version
-```
-
-Common flags may appear before or after a positional argument:
-
-```text
---dry-run
---read-only
---json
---no-release
---verbose
---yes
---write
---keep-temp
---create-only
---update-only
---config PATH
 ```
 
 ## Safety invariants
@@ -331,10 +356,18 @@ Common flags may appear before or after a positional argument:
 - no force push
 - no Git history rewrite
 - no repository deletion
-- ZIP traversal / `.git` injection / symlink / Windows-invalid path defenses
-- read-only publish requires dry-run
-- ambiguous source archives are never guessed
-- release assets are never silently enabled by discovery
-- agent-authored config is strictly schema/semantic validated
-- apply refuses stale reviewed plans
-- self-upgrade verifies SHA-256 before replacement
+- managed ownership prevents arbitrary remote-only deletion
+- `.github/**` and `.gitmake/**` protected by default
+- ZIP traversal / `.git` injection / symlink / invalid-path defenses
+- secret + large-file/LFS preflight before mutation
+- required-PR branch policy is not bypassed
+- bare tag conflicts are not silently reused
+- ambiguous source ZIPs are not guessed
+- agent-authored config is schema/semantic validated
+- reviewed plans reject stale inputs/remote state
+- MCP apply requires a human-minted one-shot approval token
+- self-upgrade verifies SHA-256
+
+## Why GitMake exists
+
+GitMake is intentionally smaller than GitHub CLI, GitHub MCP, or general release frameworks. Its job is to make one repetitive workflow—**turning a project snapshot into a safely reviewed repository update and release**—simple enough for both humans and agents to use consistently.

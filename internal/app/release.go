@@ -98,6 +98,13 @@ func prepareReleasePlan(configPath, target string, repoExists bool, cfg config.C
 				return releasePlan{}, fmt.Errorf("release %s already exists in %s (set release.on_existing to \"skip\" or \"resume\" if appropriate)", cfg.Release.Tag, target)
 			}
 		}
+		tagExists, err := gh.TagExists(target, cfg.Release.Tag)
+		if err != nil {
+			return releasePlan{}, err
+		}
+		if tagExists {
+			return releasePlan{}, fmt.Errorf("release tag %s already exists in %s without a matching GitHub Release; refusing to attach a new release to an unreviewed tag", cfg.Release.Tag, target)
+		}
 	}
 
 	return releasePlan{enabled: true, spec: spec}, nil

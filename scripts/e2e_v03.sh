@@ -13,6 +13,12 @@ r="${FAKE_GH_ROOT:?}"
 if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
 if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo ok; exit 0; fi
 if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo testuser; exit 0; fi
+if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then echo "HTTP 404: Branch not protected" >&2; exit 1; fi
+if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then
+  endpoint="$2"; rest="${endpoint#repos/}"; o="${rest%%/*}"; rest="${rest#*/}"; n="${rest%%/*}"; tag="${endpoint#*/git/ref/tags/}"; d="$r/$o/$n.git"
+  if [[ -d "$d" ]] && git --git-dir="$d" rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then echo '{"ref":"refs/tags/'"$tag"'"}'; exit 0; fi
+  echo "HTTP 404: Not Found" >&2; exit 1
+fi
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
   t="$3"; o="${t%%/*}"; n="${t#*/}"; d="$r/$o/$n.git"
   [[ -d "$d" ]] || { echo "HTTP 404 not found" >&2; exit 1; }

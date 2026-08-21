@@ -29,11 +29,13 @@ var (
 )
 
 type Config struct {
-	SchemaVersion int           `json:"schema_version"`
-	Repo          RepoConfig    `json:"repo"`
-	Source        SourceConfig  `json:"source"`
-	Git           GitConfig     `json:"git"`
-	Release       ReleaseConfig `json:"release,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	Repo          RepoConfig     `json:"repo"`
+	Source        SourceConfig   `json:"source"`
+	Git           GitConfig      `json:"git"`
+	Sync          SyncConfig     `json:"sync,omitempty"`
+	Security      SecurityConfig `json:"security,omitempty"`
+	Release       ReleaseConfig  `json:"release,omitempty"`
 }
 
 type RepoConfig struct {
@@ -52,6 +54,18 @@ type GitConfig struct {
 	Branch               string `json:"branch,omitempty"`
 	InitialCommitMessage string `json:"initial_commit_message,omitempty"`
 	CommitMessage        string `json:"commit_message,omitempty"`
+}
+
+type SyncConfig struct {
+	Mode           string   `json:"mode,omitempty"`
+	ProtectedPaths []string `json:"protected_paths,omitempty"`
+}
+
+type SecurityConfig struct {
+	SecretScan       *bool    `json:"secret_scan,omitempty"`
+	AllowSecretPaths []string `json:"allow_secret_paths,omitempty"`
+	WarnFileBytes    int64    `json:"warn_file_bytes,omitempty"`
+	MaxGitFileBytes  int64    `json:"max_git_file_bytes,omitempty"`
 }
 
 type ReleaseConfig struct {
@@ -117,6 +131,23 @@ func applyDefaults(c *Config) {
 	if c.Git.CommitMessage == "" {
 		c.Git.CommitMessage = "Update repository"
 	}
+	if c.Sync.Mode == "" {
+		c.Sync.Mode = "managed"
+	}
+	c.Sync.Mode = strings.ToLower(c.Sync.Mode)
+	if len(c.Sync.ProtectedPaths) == 0 {
+		c.Sync.ProtectedPaths = []string{".github/**", ".gitmake/**"}
+	}
+	if c.Security.SecretScan == nil {
+		v := true
+		c.Security.SecretScan = &v
+	}
+	if c.Security.WarnFileBytes == 0 {
+		c.Security.WarnFileBytes = 50 * 1024 * 1024
+	}
+	if c.Security.MaxGitFileBytes == 0 {
+		c.Security.MaxGitFileBytes = 95 * 1024 * 1024
+	}
 	if c.Source.StripRoot == nil {
 		v := true
 		c.Source.StripRoot = &v
@@ -169,6 +200,30 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Git.CommitMessage) == "" {
 		return fmt.Errorf("git.commit_message must not be blank")
+	}
+	switch c.Sync.Mode {
+	case "managed", "snapshot":
+	default:
+		return fmt.Errorf("sync.mode must be managed or snapshot")
+	}
+	for _, pattern := range c.Sync.ProtectedPaths {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("sync.protected_paths must not contain blank patterns")
+		}
+		if filepath.IsAbs(pattern) || strings.Contains(strings.ReplaceAll(pattern, "\\", "/"), "../") {
+			return fmt.Errorf("sync.protected_paths must contain repository-relative patterns: %q", pattern)
+		}
+	}
+	if c.Security.WarnFileBytes < 0 || c.Security.MaxGitFileBytes < 0 {
+		return fmt.Errorf("security file size thresholds must be non-negative")
+	}
+	if c.Security.MaxGitFileBytes > 0 && c.Security.WarnFileBytes > c.Security.MaxGitFileBytes {
+		return fmt.Errorf("security.warn_file_bytes must not exceed security.max_git_file_bytes")
+	}
+	for _, pattern := range c.Security.AllowSecretPaths {
+		if strings.TrimSpace(pattern) == "" {
+			return fmt.Errorf("security.allow_secret_paths must not contain blank patterns")
+		}
 	}
 	if c.Release.Enabled {
 		if strings.TrimSpace(c.Release.Tag) == "" {

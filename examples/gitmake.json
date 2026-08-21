@@ -6,13 +6,26 @@
     "visibility": "private"
   },
   "source": {
-    "zip": "GitMake-Demo_v0.5.2.zip",
+    "zip": "GitMake-Demo_v0.7.1.zip",
     "strip_root": true
   },
   "git": {
     "branch": "main",
     "initial_commit_message": "Initial commit",
     "commit_message": "Update GitMake-Demo"
+  },
+  "sync": {
+    "mode": "managed",
+    "protected_paths": [
+      ".github/**",
+      ".gitmake/**"
+    ]
+  },
+  "security": {
+    "secret_scan": true,
+    "allow_secret_paths": [],
+    "warn_file_bytes": 52428800,
+    "max_git_file_bytes": 99614720
   },
   "release": {
     "enabled": false

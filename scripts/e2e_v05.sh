@@ -12,7 +12,7 @@ python3 - "$TMP/manifest.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['schema']=='gitmake.ai/v1', x
-assert x['name']=='gitmake' and x['version']=='0.6.1', x
+assert x['name']=='gitmake' and x['version']=='0.7.1', x
 assert x['safety']['force_push'] is False
 assert '--dry-run' in x['commands']['preview']['command']
 assert '--read-only' in x['commands']['preview']['command']
@@ -68,7 +68,7 @@ test ! -e "$R/gitmake.json"
 python3 - "$TMP/version.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
-assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.6.1'}, x
+assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.7.1'}, x
 PY
 
 # 7. Generic JSON surfaces output without contaminating stdout with prose.
@@ -88,6 +88,17 @@ set -euo pipefail
 if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
 if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo "Logged in"; exit 0; fi
 if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo "testuser"; exit 0; fi
+# GitMake v0.7 branch/tag preflight support for the fake GitHub CLI.
+if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then
+  if [[ "${FAKE_GH_REQUIRE_PR:-0}" == "1" ]]; then echo '{"required_pull_request_reviews":{"required_approving_review_count":1}}'; exit 0; fi
+  echo "HTTP 404: Branch not protected" >&2; exit 1
+fi
+if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then
+  endpoint="${2:-}"; rest="${endpoint#repos/}"; owner="${rest%%/*}"; rest="${rest#*/}"; repo="${rest%%/*}"; tag="${endpoint#*/git/ref/tags/}"
+  remote="$root/$owner/$repo.git"
+  if [[ -d "$remote" ]] && git --git-dir="$remote" rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then echo '{"ref":"refs/tags/'"$tag"'"}'; exit 0; fi
+  echo "HTTP 404: Not Found" >&2; exit 1
+fi
 if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then echo "repository not found (HTTP 404)" >&2; exit 1; fi
 echo "unexpected gh args: $*" >&2
 exit 2

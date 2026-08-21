@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	fmt.Println("GitMake Setup 0.6.1")
+	fmt.Println("GitMake Setup 0.7.1")
 	fmt.Println()
 	exe, err := os.Executable()
 	if err != nil {
@@ -49,8 +49,9 @@ func main() {
 			fmt.Println("  Access:", status.Access)
 		}
 	} else {
-		fmt.Println("· Claude Code not detected — AI connection skipped")
-		fmt.Println("  You can connect it later with: gitmake ai setup")
+		fmt.Println("· Claude Code not detected — automatic AI connection skipped")
+		fmt.Println("  Claude:  gitmake ai setup")
+		fmt.Println("  Generic: gitmake ai setup --client generic --json")
 	}
 
 	fmt.Println()

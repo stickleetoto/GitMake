@@ -1,6 +1,7 @@
 package app
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"os"
@@ -14,7 +15,7 @@ func TestMCPDefaultToolsetIsReadOnly(t *testing.T) {
 	for _, tool := range s.tools() {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"gitmake_describe", "gitmake_doctor", "gitmake_discover", "gitmake_config_schema", "gitmake_config_validate", "gitmake_preview", "gitmake_plan", "gitmake_history"} {
+	for _, want := range []string{"gitmake_describe", "gitmake_project_inspect", "gitmake_doctor", "gitmake_discover", "gitmake_config_suggest", "gitmake_config_schema", "gitmake_config_validate", "gitmake_preview", "gitmake_plan", "gitmake_history"} {
 		if !names[want] {
 			t.Fatalf("missing read-only tool %s", want)
 		}
@@ -37,6 +38,25 @@ func TestMCPAllowWriteAddsGatedTools(t *testing.T) {
 			t.Fatalf("missing write tool %s", want)
 		}
 	}
+}
+
+func TestMCPApplyRequiresOneShotApprovalToken(t *testing.T) {
+	s := &mcpServer{allowWrite: true}
+	for _, tool := range s.tools() {
+		if tool.Name != "gitmake_apply" {
+			continue
+		}
+		req, _ := tool.InputSchema["required"].([]string)
+		seen := map[string]bool{}
+		for _, v := range req {
+			seen[v] = true
+		}
+		if !seen["plan_id"] || !seen["approval_token"] {
+			t.Fatalf("gitmake_apply must require plan_id + approval_token: %#v", req)
+		}
+		return
+	}
+	t.Fatal("gitmake_apply tool missing")
 }
 
 func TestMCPLegacyInitialize(t *testing.T) {
@@ -118,5 +138,30 @@ func TestMCPUsesClaudeProjectDirFallback(t *testing.T) {
 	b, _ := json.Marshal(result)
 	if !bytes.Contains(b, []byte(`"$id":"gitmake.config/v1"`)) {
 		t.Fatalf("unexpected result: %s", b)
+	}
+}
+
+func TestMCPConfigSuggestIsReadOnlyAndSelfContained(t *testing.T) {
+	dir := t.TempDir()
+	zipPath := filepath.Join(dir, "Demo_Source.zip")
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("Demo/go.mod")
+	_, _ = w.Write([]byte("module example.com/demo\n"))
+	_ = zw.Close()
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &mcpServer{}
+	result, err := s.callTool("gitmake_config_suggest", map[string]any{"project_dir": dir, "repo_name": "DemoRepo", "visibility": "private", "branch": "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "gitmake.json")); !os.IsNotExist(err) {
+		t.Fatalf("config suggestion must not write gitmake.json, err=%v", err)
+	}
+	b, _ := json.Marshal(result)
+	if !bytes.Contains(b, []byte(`"name":"DemoRepo"`)) {
+		t.Fatalf("unexpected suggestion: %s", b)
 	}
 }

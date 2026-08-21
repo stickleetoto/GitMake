@@ -209,7 +209,16 @@ func resolve(r *Report) {
 		return
 	}
 	if len(valid) == 1 {
-		selectSource(r, valid[0], "single_archive")
+		if valid[0].Classification == "release_asset" {
+			r.NeedsInput = true
+			r.Reason = "single_archive_looks_like_release_asset"
+			return
+		}
+		confidence := "single_archive"
+		if valid[0].Classification == "unknown" {
+			confidence = "single_archive_low"
+		}
+		selectSource(r, valid[0], confidence)
 		return
 	}
 
@@ -222,11 +231,25 @@ func resolve(r *Report) {
 		return
 	}
 	if len(sources) == 1 {
+		chosen := sources[0]
+		// An unknown archive with nearly the same source evidence is treated as
+		// ambiguous. This prevents a filename hint from silently choosing the
+		// wrong project when two plausible source bundles sit together.
+		for _, candidate := range valid {
+			if candidate.Name == chosen.Name || candidate.Classification == "release_asset" {
+				continue
+			}
+			if candidate.SourceScore >= chosen.SourceScore-2 {
+				r.NeedsInput = true
+				r.Reason = "source_confidence_margin_too_small"
+				return
+			}
+		}
 		confidence := "medium"
-		if sources[0].SourceScore >= 10 {
+		if chosen.SourceScore >= 10 && chosen.SourceScore-chosen.AssetScore >= 6 {
 			confidence = "high"
 		}
-		selectSource(r, sources[0], confidence)
+		selectSource(r, chosen, confidence)
 		return
 	}
 

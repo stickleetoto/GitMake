@@ -20,6 +20,11 @@ func (c Client) Preflight() error {
 	return nil
 }
 
+func (c Client) HasLFS() bool {
+	res, err := c.Run.Run("", "git", "lfs", "version")
+	return err == nil && res.Code == 0
+}
+
 func (c Client) Init(dir, branch string) error {
 	if res, err := c.Run.Run(dir, "git", "init"); err != nil {
 		return err

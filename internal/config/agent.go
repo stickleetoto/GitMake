@@ -84,6 +84,22 @@ func SchemaDocument() map[string]any {
 					"commit_message":         map[string]any{"type": "string", "default": "Update repository"},
 				},
 			},
+			"sync": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]any{
+					"mode":            map[string]any{"type": "string", "enum": []string{"managed", "snapshot"}, "default": "managed"},
+					"protected_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "default": []string{".github/**", ".gitmake/**"}},
+				},
+			},
+			"security": map[string]any{
+				"type": "object", "additionalProperties": false,
+				"properties": map[string]any{
+					"secret_scan":        map[string]any{"type": "boolean", "default": true},
+					"allow_secret_paths": map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
+					"warn_file_bytes":    map[string]any{"type": "integer", "minimum": 0, "default": 52428800},
+					"max_git_file_bytes": map[string]any{"type": "integer", "minimum": 0, "default": 99614720},
+				},
+			},
 			"release": map[string]any{
 				"type": "object", "additionalProperties": false,
 				"properties": map[string]any{

@@ -16,6 +16,9 @@ func runAISetup(o Options) error {
 	if o.ReadOnly {
 		return fmt.Errorf("read-only mode blocks `gitmake ai setup`")
 	}
+	if o.AIClient == "generic" {
+		return runGenericAISetup(o)
+	}
 	if o.AIWrite && !o.Yes {
 		ok, err := confirmAIWriteAccess()
 		if err != nil {
@@ -73,6 +76,9 @@ func runAISetup(o Options) error {
 }
 
 func runAIStatus(o Options) error {
+	if o.AIClient == "generic" {
+		return runGenericAIStatus(o)
+	}
 	mgr := aiconnect.Manager{Verbose: o.Verbose}
 	status, err := mgr.Status()
 	if err != nil {
@@ -111,6 +117,13 @@ func runAIRemove(o Options) error {
 	if o.ReadOnly {
 		return fmt.Errorf("read-only mode blocks `gitmake ai remove`")
 	}
+	if o.AIClient == "generic" {
+		if o.JSON {
+			return emitJSON(map[string]any{"schema": "gitmake.ai-remove/v1", "ok": true, "client": "generic", "removed": false, "note": "Generic MCP clients are not registered by GitMake; remove the stdio entry in your client."})
+		}
+		fmt.Println("Generic MCP clients are not registered by GitMake. Remove the stdio entry in your client configuration if needed.")
+		return nil
+	}
 	mgr := aiconnect.Manager{Verbose: o.Verbose}
 	removed, status, err := mgr.Remove()
 	if err != nil {
@@ -131,6 +144,62 @@ func runAIRemove(o Options) error {
 	} else {
 		fmt.Println("✓ Nothing to remove")
 	}
+	return nil
+}
+
+func runGenericAISetup(o Options) error {
+	target, err := stableAIExecutable()
+	if err != nil {
+		return err
+	}
+	args := []string{"mcp"}
+	access := "read-only"
+	if o.AIWrite {
+		if !o.Yes {
+			ok, err := confirmAIWriteAccess()
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return nil
+			}
+		}
+		args = append(args, "--allow-write")
+		access = "write"
+	}
+	desc := map[string]any{
+		"schema": "gitmake.mcp-registration/v1", "client": "generic", "transport": "stdio",
+		"command": target, "args": args, "access": access,
+		"note": "Add this stdio server to any MCP-compatible client. GitMake does not modify third-party client config in generic mode.",
+	}
+	if o.JSON {
+		return emitJSON(desc)
+	}
+	fmt.Printf("GitMake Generic MCP · %s\n\n", Version)
+	fmt.Println("Transport          stdio")
+	fmt.Println("Command            " + target)
+	fmt.Println("Args               " + strings.Join(args, " "))
+	fmt.Println("Access             " + access)
+	fmt.Println("\nUse these values in any MCP-compatible client.")
+	return nil
+}
+
+func runGenericAIStatus(o Options) error {
+	target, err := stableAIExecutable()
+	if err != nil {
+		return err
+	}
+	desc := map[string]any{
+		"schema": "gitmake.ai-status/v1", "client": "generic", "server": "gitmake",
+		"transport": "stdio", "command": target, "args": []string{"mcp"}, "ready": true,
+	}
+	if o.JSON {
+		return emitJSON(desc)
+	}
+	fmt.Printf("GitMake Generic MCP · %s\n\n", Version)
+	fmt.Println("✓ Server            ready")
+	fmt.Println("· Transport         stdio")
+	fmt.Println("· Command           " + target + " mcp")
 	return nil
 }
 
@@ -164,8 +233,8 @@ func confirmAIWriteAccess() (bool, error) {
 	fmt.Println()
 	fmt.Println("AI write access allows:")
 	fmt.Println("  • create/update gitmake.json")
-	fmt.Println("  • apply reviewed GitMake plans")
-	fmt.Println("  • publish to GitHub through an approved plan")
+	fmt.Println("  • submit reviewed GitMake plans for apply")
+	fmt.Println("  • GitHub apply still requires a user-created one-shot approval token")
 	fmt.Println()
 	fmt.Print("Enable write access? [y/N]: ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')

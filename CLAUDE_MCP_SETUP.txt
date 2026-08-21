@@ -1,32 +1,40 @@
-GitMake v0.6.1 + Claude Code
-=============================
+GitMake v0.7.1 + AI/MCP
+=======================
 
-Recommended setup:
+CLAUDE CODE (recommended one-click path)
 
   gitmake ai setup
 
-That command:
+This:
   - detects Claude Code
-  - ensures GitMake uses a stable installed executable on Windows
-  - registers a user-scoped stdio MCP server named `gitmake`
-  - keeps access read-only by default
-  - verifies the resulting registration/status
+  - ensures a stable GitMake executable path
+  - registers the user-scoped stdio MCP server
+  - defaults to read-only tools
+  - checks connection status
 
-Check:
-
-  gitmake ai status
-
-Enable reviewed write tools only when intentionally needed:
+To expose guarded config-write + approved-plan apply tools:
 
   gitmake ai setup --write
 
-The write-enabled registration still exposes only validated config write/patch
-and reviewed-plan apply. It does not expose force-push, repository deletion,
-history rewriting, or an unreviewed direct publish tool.
+Actual MCP apply still requires a one-shot human approval token:
 
-Remove:
+  gitmake plan --json
+  gitmake approve <plan_id>
 
-  gitmake ai remove
+The approval command requires an interactive terminal. MCP does not expose a tool that can create its own approval token.
 
-Advanced/manual registration is still possible with `gitmake mcp`, but normal
-Claude Code users should not need to remember the raw `claude mcp add` command.
+GENERIC MCP CLIENTS
+
+  gitmake ai setup --client generic --json
+
+GitMake returns a machine-readable stdio descriptor containing the executable path and MCP arguments. It does not edit an unknown client's config automatically.
+
+RAW SERVER
+
+Read-only:
+  gitmake mcp
+
+Guarded write surface:
+  gitmake mcp --allow-write
+
+GitMake's MCP surface intentionally covers project inspection, discovery, schema/config handling, preview, plan, history, and approved apply. It does not expose force push, repository deletion, history rewrite, or an unreviewed direct-publish tool.

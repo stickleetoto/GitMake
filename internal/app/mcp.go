@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gitmake/internal/approval"
 )
 
 const (
@@ -148,8 +150,10 @@ func (s *mcpServer) tools() []mcpTool {
 	zipArg := map[string]any{"type": "string", "description": "Optional source ZIP path relative to project_dir or absolute."}
 	tools := []mcpTool{
 		{Name: "gitmake_describe", Description: "Return GitMake's machine-readable AI capability manifest.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
+		{Name: "gitmake_project_inspect", Description: "Inspect project config and ZIP discovery state without shell commands or project mutation.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_doctor", Description: "Diagnose Git, GitHub CLI, authentication, identity, installation, and project config without mutating the project.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
-		{Name: "gitmake_discover", Description: "Classify ZIP archives and identify likely project source/release assets without changing files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
+		{Name: "gitmake_discover", Description: "Classify ZIP archives conservatively and identify likely project source/release assets without changing files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
+		{Name: "gitmake_config_suggest", Description: "Build a validated gitmake.json candidate in memory from project discovery. Does not write files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg, "repo_name": map[string]any{"type": "string"}, "visibility": map[string]any{"type": "string", "enum": []string{"private", "public", "internal"}}, "branch": map[string]any{"type": "string"}})},
 		{Name: "gitmake_config_schema", Description: "Return the authoritative JSON Schema for gitmake.json. Use this before authoring config.", InputSchema: objectSchema(nil, map[string]any{})},
 		{Name: "gitmake_config_validate", Description: "Strictly validate the current gitmake.json.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_preview", Description: "Read-only dry-run of repository CREATE/UPDATE planning. Does not write config or change GitHub.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg})},
@@ -162,7 +166,7 @@ func (s *mcpServer) tools() []mcpTool {
 		tools = append(tools,
 			mcpTool{Name: "gitmake_config_write", Description: "Validate and atomically write gitmake.json. Prefer this over direct file editing.", InputSchema: objectSchema([]string{"config"}, map[string]any{"project_dir": projectDir, "config": configObj})},
 			mcpTool{Name: "gitmake_config_patch", Description: "Validate and atomically patch an existing gitmake.json.", InputSchema: objectSchema([]string{"patch"}, map[string]any{"project_dir": projectDir, "patch": patchObj})},
-			mcpTool{Name: "gitmake_apply", Description: "Apply a previously reviewed plan. Revalidates source/config/remote state and rejects stale plans.", InputSchema: objectSchema([]string{"plan_id"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}})},
+			mcpTool{Name: "gitmake_apply", Description: "Apply a reviewed plan using a user-created one-shot approval token. Revalidates source/config/remote state and consumes the token only after success.", InputSchema: objectSchema([]string{"plan_id", "approval_token"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
 		)
 	}
 	return tools
@@ -192,10 +196,31 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 	switch name {
 	case "gitmake_describe":
 		return invokeGitMakeJSON(projectDir, nil, "ai", "describe", "--json")
+	case "gitmake_project_inspect":
+		return invokeGitMakeJSON(projectDir, nil, "inspect", "--json")
 	case "gitmake_doctor":
 		return invokeGitMakeJSON(projectDir, nil, "doctor", "--json")
 	case "gitmake_discover":
 		return invokeGitMakeJSON(projectDir, nil, "discover", "--json")
+	case "gitmake_config_suggest":
+		repoName, err := stringArg(args, "repo_name", false)
+		if err != nil {
+			return nil, err
+		}
+		visibility, err := stringArg(args, "visibility", false)
+		if err != nil {
+			return nil, err
+		}
+		branch, err := stringArg(args, "branch", false)
+		if err != nil {
+			return nil, err
+		}
+		dir := effectiveMCPProjectDir(projectDir)
+		cfg, err := projectConfigForSuggestion(dir, sourceZIP, repoName, visibility, branch)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"schema": "gitmake.config-suggestion/v1", "ok": true, "config": cfg}, nil
 	case "gitmake_config_schema":
 		return invokeGitMakeJSON(projectDir, nil, "config", "schema", "--json")
 	case "gitmake_config_validate":
@@ -248,7 +273,21 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		return invokeGitMakeJSON(projectDir, nil, "apply", planID, "--json")
+		token, err := stringArg(args, "approval_token", true)
+		if err != nil {
+			return nil, err
+		}
+		if err := approval.Validate(planID, token); err != nil {
+			return nil, fmt.Errorf("one-shot approval rejected: %w", err)
+		}
+		result, err := invokeGitMakeJSON(projectDir, nil, "apply", planID, "--json")
+		if err != nil {
+			return result, err
+		}
+		if err := approval.Consume(planID, token); err != nil {
+			return result, fmt.Errorf("apply succeeded but approval token could not be consumed: %w", err)
+		}
+		return result, nil
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
@@ -271,6 +310,20 @@ func stringArg(args map[string]any, name string, required bool) (string, error) 
 		return "", fmt.Errorf("%s cannot be empty", name)
 	}
 	return s, nil
+}
+
+func effectiveMCPProjectDir(projectDir string) string {
+	if strings.TrimSpace(projectDir) != "" {
+		return projectDir
+	}
+	if v := strings.TrimSpace(os.Getenv("GITMAKE_PROJECT_DIR")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("CLAUDE_PROJECT_DIR")); v != "" {
+		return v
+	}
+	cwd, _ := os.Getwd()
+	return cwd
 }
 
 func invokeGitMakeJSON(projectDir string, stdin []byte, args ...string) (any, error) {
