@@ -1,4 +1,4 @@
-# GitMake v0.7.1
+# GitMake v0.7.2
 
 GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,7 @@ commit + normal push
 optional Release + assets
 ```
 
-v0.7.1 focuses on safety for real repositories and AI agents: managed file ownership, secret/large-file scanning, one-shot human approval for MCP apply, conservative multi-ZIP discovery, GitHub branch/tag preflight, and cross-platform/generic MCP support.
+v0.7.2 adds project-context safety on top of v0.7.1: repository identity binding, stale-source retarget refusal, destructive mass-deletion gates, stronger plan provenance, and destructive-only human approval tokens.
 
 ## Install
 
@@ -83,6 +83,35 @@ This prevents a source ZIP from accidentally erasing repository-only workflows/c
 ```
 
 Protected paths remain protected in snapshot mode.
+
+## Project identity and destructive-change gate
+
+GitMake now commits a protected repository identity record at `.gitmake/project.json`. On later updates it verifies that the cloned repository is still bound to the target owner/name before synchronization. A conflicting valid identity is a hard stop (`PROJECT_IDENTITY_MISMATCH`).
+
+A stale real `gitmake.json` is also never auto-retargeted to the only ZIP beside it. Starter placeholder configs can still self-heal, but an existing repository config with a missing `source.zip` must be fixed explicitly (`PROJECT_SOURCE_MISMATCH`).
+
+Reviewed plans always expose:
+
+```text
+working_directory
+config_path
+source_path
+repository
+remote_visibility
+project_identity
+changes
+risk
+```
+
+If at least 10 previously managed files and at least 30% of the managed baseline would be deleted, the plan is classified as destructive. Normal publish/apply/approval is blocked. A human must explicitly opt in:
+
+```text
+gitmake apply <plan_id> --destructive
+# or, for MCP:
+gitmake approve <plan_id> --destructive
+```
+
+The destructive approval token is still short-lived, plan-bound, single-use, and cannot be minted through MCP.
 
 ## Security preflight
 
@@ -188,7 +217,7 @@ Create a reviewed immutable plan:
 gitmake plan --json
 ```
 
-A plan binds source/config digests, target repository, remote baseline, exact user-visible change counts, release inputs, and a fingerprint.
+A plan binds working-directory/config/source provenance, project identity, configured and remote visibility, source/config digests, target repository, remote baseline, exact user-visible change counts, deletion risk, release inputs, and a fingerprint.
 
 For a local human-controlled CLI apply:
 
@@ -214,7 +243,7 @@ The token:
 - is consumed after successful apply
 - rejects replay
 
-The agent sends both `plan_id` and `approval_token` to `gitmake_apply`.
+The agent sends both `plan_id` and `approval_token` to `gitmake_apply`. If the plan is destructive, a normal token is rejected; only a human-created `--destructive` token can authorize it.
 
 ## AI discovery
 

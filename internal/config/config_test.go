@@ -222,3 +222,23 @@ func TestSchemaDocumentDeclaresStrictRoot(t *testing.T) {
 		t.Fatalf("schema root should reject unknown properties")
 	}
 }
+
+func TestResolveProjectZIPRefusesRetargetOfRealRepoConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "gitmake.json")
+	strip := true
+	cfg := Config{SchemaVersion: CurrentSchemaVersion, Repo: RepoConfig{Name: "RealRepo", Visibility: "private"}, Source: SourceConfig{ZIP: "Old.zip", StripRoot: &strip}, Git: GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"}}
+	if err := Save(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "NewProject.zip"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, repaired, err := ResolveProjectZIP(cfgPath, &loaded); err == nil || repaired || !strings.Contains(err.Error(), "refusing to retarget") {
+		t.Fatalf("repaired=%v err=%v", repaired, err)
+	}
+}

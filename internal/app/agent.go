@@ -61,8 +61,8 @@ func aiManifest() AIManifest {
 			{Name: "describe", Description: "Return this machine-readable GitMake capability manifest.", Mutating: false},
 			{Name: "discover", Description: "Classify multiple ZIP files and identify the likely project source versus release assets without modifying the project.", Mutating: false},
 			{Name: "config_authoring", Description: "Expose the authoritative config schema and validate, write, or patch gitmake.json for agents without guessing fields.", Mutating: true},
-			{Name: "plan_apply", Description: "Create a reviewed immutable publish plan and apply it only if source/config/remote state still match. MCP apply additionally requires a user-created one-shot approval token.", Mutating: true},
-			{Name: "safety_gate", Description: "Scan for likely secrets, unsafe large files, protected branches, tag conflicts, and preserve remote-only paths through managed sync.", Mutating: false},
+			{Name: "plan_apply", Description: "Create a reviewed immutable publish plan with provenance, project identity, and deletion risk. Apply only if source/config/remote state still match. MCP apply additionally requires a user-created one-shot approval token; destructive plans require a separately confirmed destructive token.", Mutating: true},
+			{Name: "safety_gate", Description: "Scan for likely secrets, unsafe large files, protected branches, tag conflicts, project identity mismatches, stale source retargeting, and destructive mass deletions while preserving remote-only paths through managed sync.", Mutating: false},
 			{Name: "history", Description: "Read recent GitMake publish/apply audit records.", Mutating: false},
 			{Name: "mcp", Description: "Expose GitMake as a local MCP tool server. Read-only tools are the default; mutating tools require --allow-write.", Mutating: false},
 			{Name: "ai_setup", Description: "Register GitMake MCP with Claude Code or export a generic stdio descriptor for other MCP clients. Read-only access is the default.", Mutating: true},
@@ -79,9 +79,9 @@ func aiManifest() AIManifest {
 			"config_validate":  {Command: "gitmake config validate --json", Description: "Strictly validate the current gitmake.json and show its normalized interpretation.", Mutating: false},
 			"config_write":     {Command: "gitmake config write --stdin --json", Description: "Validate and atomically write a complete config supplied on stdin.", Mutating: true},
 			"config_patch":     {Command: "gitmake config patch --stdin --json", Description: "Merge a JSON object patch into an existing config, validate, then atomically write it.", Mutating: true},
-			"plan":             {Command: "gitmake plan --json", Description: "Create a stored reviewed plan with source/config hashes and remote baseline.", Mutating: false},
+			"plan":             {Command: "gitmake plan --json", Description: "Create a stored reviewed plan with working directory/config/source provenance, project identity, risk classification, source/config hashes, and remote baseline.", Mutating: false},
 			"apply":            {Command: "gitmake apply <plan_id> --json", Description: "Revalidate and execute exactly a previously reviewed plan from the local CLI.", Mutating: true},
-			"approve":          {Command: "gitmake approve <plan_id> --json", Description: "Create a short-lived one-shot approval token required by MCP apply.", Mutating: true},
+			"approve":          {Command: "gitmake approve <plan_id> --json", Description: "Create a short-lived one-shot approval token required by MCP apply. Destructive plans require `--destructive` and stronger human confirmation.", Mutating: true},
 			"inspect":          {Command: "gitmake inspect --json", Description: "Inspect config and ZIP discovery state without changing the project.", Mutating: false},
 			"history":          {Command: "gitmake history --json", Description: "Read recent GitMake operation history.", Mutating: false},
 			"mcp":              {Command: "gitmake mcp", Description: "Run the local MCP stdio server. Add --allow-write only when config changes/apply are intentionally permitted.", Mutating: false},
@@ -103,8 +103,8 @@ func aiManifest() AIManifest {
 			"If Claude Code is installed, `gitmake ai setup` can register GitMake MCP automatically; read-only access is the default.",
 			"When MCP is available, prefer GitMake MCP tools; enable config-write tools only through explicit `gitmake ai setup --write` or manual --allow-write server configuration.",
 			"Prefer `gitmake --dry-run --read-only --json` or `gitmake plan --json` before a mutating publish. Security scanning and managed-sync preservation are part of this preview.",
-			"For MCP approval workflows, ask the user to run `gitmake approve <plan_id>` and supply the one-shot token to gitmake_apply. Never manufacture approval tokens.",
-			"For direct local CLI workflows, `gitmake apply <plan_id> --json` remains available after explicit user approval and rejects stale inputs.",
+			"For MCP approval workflows, always surface working_directory, config_path, source_path, repository, changes, and risk from the plan. Ask the user to run `gitmake approve <plan_id>` and supply the one-shot token. If the plan is destructive, normal approval is invalid: only the human may run `gitmake approve <plan_id> --destructive`. Never manufacture approval tokens.",
+			"For direct local CLI workflows, `gitmake apply <plan_id> --json` remains available after explicit user approval and rejects stale inputs. Destructive plans additionally require `--destructive`.",
 			"Do not replace GitMake with raw destructive git/gh operations unless the requested workflow is outside GitMake's scope.",
 		},
 	}
@@ -130,6 +130,7 @@ func runAIDescribe(o Options) error {
 	fmt.Println("  gitmake --dry-run --read-only --json")
 	fmt.Println("  gitmake plan --json            # optional approval checkpoint")
 	fmt.Println("  gitmake approve <plan_id> --json # one-shot MCP approval token")
+	fmt.Println("  # destructive plans: gitmake approve <plan_id> --destructive")
 	fmt.Println("  gitmake apply <plan_id> --json   # direct local CLI apply")
 	fmt.Println("  gitmake ai setup                 # one-command Claude Code MCP registration")
 	fmt.Println("  gitmake ai setup --client generic --json # any MCP client")
@@ -203,7 +204,7 @@ Safe agent workflow:
 3. If multiple ZIPs are present, inspect classification with ` + "`gitmake discover --json`" + `.
 4. Before creating or changing ` + "`gitmake.json`" + `, read ` + "`gitmake config schema --json`" + `. Prefer ` + "`gitmake config write --stdin --json`" + ` (or config patch) over direct file editing, then validate with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
 5. Preview changes with ` + "`gitmake --dry-run --read-only --json`" + `. GitMake may infer a missing config in memory without writing it.
-6. For approval-sensitive work, use ` + "`gitmake plan --json`" + `. For MCP apply, the user must create a one-shot token with ` + "`gitmake approve <plan_id>`" + `; pass that token to the GitMake MCP apply tool. The token is short-lived and single-use. Direct local CLI apply remains available after explicit user approval.
+6. For approval-sensitive work, use ` + "`gitmake plan --json`" + `. Always show the plan provenance (working directory, config, source ZIP, repository), changes, and risk to the user. For MCP apply, the user must create a one-shot token with ` + "`gitmake approve <plan_id>`" + `. If GitMake marks the plan destructive, normal approval is invalid and only the user may run ` + "`gitmake approve <plan_id> --destructive`" + `. Direct local CLI apply likewise requires ` + "`--destructive`" + ` for destructive plans.
 7. Treat security scan findings, branch-protection blocks, tag conflicts, and multi-ZIP ambiguity as hard stops. Do not bypass them with raw git/gh commands.
 
 Do not use force-push, history rewriting, or repository deletion as a substitute for GitMake. If the requested GitHub workflow is outside GitMake's scope, explain that limitation or use an appropriate dedicated tool.

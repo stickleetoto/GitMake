@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"gitmake/internal/approval"
+	"gitmake/internal/planstore"
 )
 
 const (
@@ -157,7 +158,7 @@ func (s *mcpServer) tools() []mcpTool {
 		{Name: "gitmake_config_schema", Description: "Return the authoritative JSON Schema for gitmake.json. Use this before authoring config.", InputSchema: objectSchema(nil, map[string]any{})},
 		{Name: "gitmake_config_validate", Description: "Strictly validate the current gitmake.json.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_preview", Description: "Read-only dry-run of repository CREATE/UPDATE planning. Does not write config or change GitHub.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg})},
-		{Name: "gitmake_plan", Description: "Create a reviewed publish plan with source/config/remote hashes. Does not publish.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg})},
+		{Name: "gitmake_plan", Description: "Create a reviewed publish plan with provenance, project identity, risk classification, and source/config/remote hashes. Does not publish. Always surface working_directory, config_path, source_path, repository, changes, and risk to the user before approval.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_zip": zipArg})},
 		{Name: "gitmake_history", Description: "Read recent GitMake operation history.", InputSchema: objectSchema(nil, map[string]any{})},
 	}
 	if s.allowWrite {
@@ -277,10 +278,22 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := approval.Validate(planID, token); err != nil {
+		record, err := approval.ValidateRecord(planID, token)
+		if err != nil {
 			return nil, fmt.Errorf("one-shot approval rejected: %w", err)
 		}
-		result, err := invokeGitMakeJSON(projectDir, nil, "apply", planID, "--json")
+		plan, _, err := planstore.Load(planID)
+		if err != nil {
+			return nil, err
+		}
+		if plan.Risk.Destructive && !record.Destructive {
+			return nil, fmt.Errorf("one-shot approval rejected: plan %s is destructive and requires a human-created `gitmake approve %s --destructive` token", planID, planID)
+		}
+		cli := []string{"apply", planID, "--json"}
+		if record.Destructive {
+			cli = append(cli, "--destructive")
+		}
+		result, err := invokeGitMakeJSON(projectDir, nil, cli...)
 		if err != nil {
 			return result, err
 		}

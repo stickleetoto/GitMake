@@ -99,7 +99,7 @@ func TestResolveProjectZIPRepairsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestResolveProjectZIPRepairsStaleSingleZip(t *testing.T) {
+func TestResolveProjectZIPRefusesStaleSingleZipForRealRepo(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "gitmake.json")
 	data := `{"repo":{"name":"demo"},"source":{"zip":"old.zip"},"git":{}}`
@@ -114,11 +114,8 @@ func TestResolveProjectZIPRepairsStaleSingleZip(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, repaired, err := ResolveProjectZIP(path, &c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !repaired || c.Source.ZIP != "new.zip" || c.Repo.Name != "demo" {
-		t.Fatalf("unexpected stale repair: repaired=%v cfg=%+v", repaired, c)
+	if err == nil || repaired || !strings.Contains(err.Error(), "refusing to retarget") {
+		t.Fatalf("expected safe retarget refusal: repaired=%v err=%v", repaired, err)
 	}
 }
 

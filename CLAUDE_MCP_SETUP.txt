@@ -1,4 +1,4 @@
-GitMake v0.7.1 + AI/MCP
+GitMake v0.7.2 + AI/MCP
 =======================
 
 CLAUDE CODE (recommended one-click path)

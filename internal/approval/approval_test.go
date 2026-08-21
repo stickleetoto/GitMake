@@ -20,3 +20,18 @@ func TestOneShotApproval(t *testing.T) {
 		t.Fatal("wrong token should be rejected")
 	}
 }
+
+func TestDestructiveApprovalRecord(t *testing.T) {
+	planID := "gm_destructive_test"
+	token, _, err := Create(planID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := ValidateRecord(planID, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Destructive {
+		t.Fatal("expected destructive approval class")
+	}
+}

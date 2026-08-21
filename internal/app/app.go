@@ -17,12 +17,13 @@ import (
 	"gitmake/internal/github"
 	"gitmake/internal/gitops"
 	"gitmake/internal/installer"
+	"gitmake/internal/projectid"
 	"gitmake/internal/runner"
 	"gitmake/internal/syncer"
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.7.1"
+const Version = "0.7.2"
 
 type Options struct {
 	Command       string
@@ -44,6 +45,7 @@ type Options struct {
 	MCPAllowWrite bool
 	AIWrite       bool
 	ApprovalToken string
+	Destructive   bool
 	AIClient      string
 	State         *PipelineState
 }
@@ -203,6 +205,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.MCPAllowWrite, "allow-write", false, "expose mutating tools in MCP mode")
 	fs.BoolVar(&o.AIWrite, "write", false, "configure an AI client with reviewed GitMake write tools")
 	fs.StringVar(&o.ApprovalToken, "approval", "", "one-shot approval token for MCP plan apply")
+	fs.BoolVar(&o.Destructive, "destructive", false, "explicitly approve a plan classified as destructive")
 	fs.StringVar(&o.AIClient, "client", "claude", "AI client for setup/status/remove: claude or generic")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
@@ -213,6 +216,9 @@ func parseArgs(args []string) (Options, error) {
 	}
 	if o.AIWrite && o.Command != "ai-setup" {
 		return Options{}, errors.New("--write is only valid with `gitmake ai setup`")
+	}
+	if o.Destructive && o.Command != "approve" && o.Command != "apply" {
+		return Options{}, errors.New("--destructive is only valid with `gitmake approve` or `gitmake apply`")
 	}
 	if o.MCPAllowWrite && o.Command != "mcp" {
 		return Options{}, errors.New("--allow-write is only valid with `gitmake mcp`")
@@ -382,6 +388,7 @@ Common options:
   --allow-write   In MCP mode, expose config write/patch and approved plan apply tools
   --write         With gitmake ai setup, enable config writes + approved plan apply
   --client NAME   AI setup client: claude or generic
+  --destructive   Required for applying/approving plans with mass deletions
   --version       Print GitMake version
 
 Safety:
@@ -389,6 +396,8 @@ Safety:
   Managed sync preserves remote-only files and protected paths by default.
   Secret/large-file/LFS/branch/tag preflight runs before mutation.
   MCP apply requires a one-shot human approval token.
+  Destructive plans require a separate explicit --destructive human approval.
+  Existing repository configs are never auto-retargeted to a different lone ZIP.
 `, Version)
 }
 
@@ -842,6 +851,7 @@ func runPublish(o Options) error {
 		o.State.Repository = target
 		if exists {
 			o.State.Mode = "UPDATE"
+			o.State.RemoteVisibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
 		} else {
 			o.State.Mode = "CREATE"
 		}
@@ -868,6 +878,9 @@ func runPublish(o Options) error {
 	fmt.Printf("GitMake %s\n\n", Version)
 	fmt.Printf("  %s\n", cfg.Repo.Name)
 	fmt.Printf("  %s · %s\n\n", target, cfg.Repo.Visibility)
+	if exists && strings.TrimSpace(repoInfo.Visibility) != "" && !strings.EqualFold(repoInfo.Visibility, cfg.Repo.Visibility) {
+		fmt.Printf("! Visibility mismatch   config %s · remote %s (remote unchanged)\n", cfg.Repo.Visibility, strings.ToLower(repoInfo.Visibility))
+	}
 	if repaired {
 		fmt.Printf("✓ Source selected       %s\n", filepath.Base(zipPath))
 	}
@@ -944,7 +957,14 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 		return err
 	}
 	if o.State != nil {
-		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, FirstAdopt: syncResult.FirstAdopt}
+		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, PriorManaged: syncResult.PriorManaged, FirstAdopt: syncResult.FirstAdopt}
+	}
+	identity, err := projectid.Write(snapshot, target)
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
+		o.State.Identity = &IdentityState{Schema: identity.Schema, ProjectID: identity.ProjectID, Repository: identity.Repository, Status: "created"}
 	}
 	if err := git.Init(snapshot, cfg.Git.Branch); err != nil {
 		return err
@@ -966,6 +986,7 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	added, modified, deleted := diffCounts(diff)
 	if o.State != nil {
 		o.State.Changes = &ChangeCounts{Added: added, Modified: modified, Deleted: deleted}
+		o.State.Risk = calculateRisk(o.State.Changes, o.State.Sync, cfg.Repo.Visibility, o.State.RemoteVisibility)
 	}
 
 	if o.DryRun {
@@ -1041,6 +1062,17 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	if fallback {
 		fmt.Printf("· Branch fallback       %s → %s\n", cfg.Git.Branch, branch)
 	}
+	identity, identityExists, err := projectid.Validate(repoDir, target)
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
+		if identityExists {
+			o.State.Identity = &IdentityState{Schema: identity.Schema, ProjectID: identity.ProjectID, Repository: identity.Repository, Status: "verified"}
+		} else {
+			o.State.Identity = &IdentityState{Repository: target, Status: "first_adoption"}
+		}
+	}
 	policy, err := gh.BranchPolicy(target, branch)
 	if err != nil {
 		return err
@@ -1056,7 +1088,25 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		return err
 	}
 	if o.State != nil {
-		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, FirstAdopt: syncResult.FirstAdopt, Deleted: syncResult.Deleted, Preserved: syncResult.Preserved}
+		o.State.Sync = &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, PriorManaged: syncResult.PriorManaged, FirstAdopt: syncResult.FirstAdopt, Deleted: syncResult.Deleted, Preserved: syncResult.Preserved}
+	}
+	// Re-write the identity after sync as protected GitMake metadata. A source
+	// archive may legitimately contain other .gitmake files; it must never be
+	// able to erase or replace the repository binding.
+	if identityExists {
+		identity, err = projectid.WriteRecord(repoDir, identity)
+	} else {
+		identity, err = projectid.Write(repoDir, target)
+	}
+	if err != nil {
+		return err
+	}
+	if o.State != nil {
+		status := "verified"
+		if !identityExists {
+			status = "adopted"
+		}
+		o.State.Identity = &IdentityState{Schema: identity.Schema, ProjectID: identity.ProjectID, Repository: identity.Repository, Status: status}
 	}
 	if syncResult.FirstAdopt {
 		fmt.Println("· Managed sync          first adoption · remote-only files preserved")
@@ -1081,6 +1131,7 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		}
 		if o.State != nil {
 			o.State.Changes = &ChangeCounts{}
+			o.State.Risk = calculateRisk(o.State.Changes, o.State.Sync, cfg.Repo.Visibility, o.State.RemoteVisibility)
 			o.State.enter("RELEASE")
 		}
 		err := finishRelease(release, target, branch, o.DryRun, gh)
@@ -1101,8 +1152,19 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		return err
 	}
 	added, modified, deleted := diffCounts(diff)
+	changes := &ChangeCounts{Added: added, Modified: modified, Deleted: deleted}
+	syncState := &SyncState{Mode: cfg.Sync.Mode, ManagedFiles: syncResult.ManagedFiles, PriorManaged: syncResult.PriorManaged, FirstAdopt: syncResult.FirstAdopt, Deleted: syncResult.Deleted, Preserved: syncResult.Preserved}
+	remoteVisibility := ""
 	if o.State != nil {
-		o.State.Changes = &ChangeCounts{Added: added, Modified: modified, Deleted: deleted}
+		remoteVisibility = o.State.RemoteVisibility
+	}
+	risk := calculateRisk(changes, syncState, cfg.Repo.Visibility, remoteVisibility)
+	if o.State != nil {
+		o.State.Changes = changes
+		o.State.Risk = risk
+	}
+	if risk.Destructive && !o.DryRun && !o.Destructive {
+		return fmt.Errorf("destructive change blocked: %d of %d previously managed files would be deleted (%.1f%%); create a plan, review it, then use `gitmake apply <plan_id> --destructive` or `gitmake approve <plan_id> --destructive` for MCP", risk.Deleted, risk.ManagedBaseline, risk.DeletionRatio*100)
 	}
 	if o.DryRun {
 		fmt.Printf("✓ Repository plan       UPDATE · +%d ~%d -%d\n", added, modified, deleted)
@@ -1170,8 +1232,8 @@ func diffCounts(diff string) (added, modified, deleted int) {
 		if len(parts) > 1 {
 			path = filepath.ToSlash(parts[len(parts)-1])
 		}
-		if strings.EqualFold(path, ".gitmake/managed.json") {
-			continue // internal ownership metadata is not a user project change
+		if strings.EqualFold(path, ".gitmake/managed.json") || strings.EqualFold(path, ".gitmake/project.json") {
+			continue // internal ownership/identity metadata is not a user project change
 		}
 		if strings.HasPrefix(status, "A") {
 			added++

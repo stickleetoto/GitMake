@@ -16,15 +16,16 @@ const Schema = "gitmake.approval/v1"
 const ttl = 30 * time.Minute
 
 type Record struct {
-	Schema    string    `json:"schema"`
-	PlanID    string    `json:"plan_id"`
-	TokenHash string    `json:"token_hash"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Used      bool      `json:"used"`
+	Schema      string    `json:"schema"`
+	PlanID      string    `json:"plan_id"`
+	TokenHash   string    `json:"token_hash"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	Used        bool      `json:"used"`
+	Destructive bool      `json:"destructive"`
 }
 
-func Create(planID string) (token string, expires time.Time, err error) {
+func Create(planID string, destructive ...bool) (token string, expires time.Time, err error) {
 	if strings.TrimSpace(planID) == "" {
 		return "", time.Time{}, fmt.Errorf("plan id is required")
 	}
@@ -35,28 +36,34 @@ func Create(planID string) (token string, expires time.Time, err error) {
 	token = "gma_" + hex.EncodeToString(raw)
 	now := time.Now().UTC()
 	expires = now.Add(ttl)
-	r := Record{Schema: Schema, PlanID: planID, TokenHash: hash(token), CreatedAt: now, ExpiresAt: expires}
+	d := len(destructive) > 0 && destructive[0]
+	r := Record{Schema: Schema, PlanID: planID, TokenHash: hash(token), CreatedAt: now, ExpiresAt: expires, Destructive: d}
 	if err := save(r); err != nil {
 		return "", time.Time{}, err
 	}
 	return token, expires, nil
 }
 
-func Validate(planID, token string) error {
+func ValidateRecord(planID, token string) (Record, error) {
 	r, err := load(planID)
 	if err != nil {
-		return err
+		return Record{}, err
 	}
 	if r.Used {
-		return fmt.Errorf("approval token for plan %s was already used", planID)
+		return Record{}, fmt.Errorf("approval token for plan %s was already used", planID)
 	}
 	if time.Now().UTC().After(r.ExpiresAt) {
-		return fmt.Errorf("approval token for plan %s expired", planID)
+		return Record{}, fmt.Errorf("approval token for plan %s expired", planID)
 	}
 	if !strings.EqualFold(r.TokenHash, hash(token)) {
-		return fmt.Errorf("approval token is invalid for plan %s", planID)
+		return Record{}, fmt.Errorf("approval token is invalid for plan %s", planID)
 	}
-	return nil
+	return r, nil
+}
+
+func Validate(planID, token string) error {
+	_, err := ValidateRecord(planID, token)
+	return err
 }
 
 func Consume(planID, token string) error {

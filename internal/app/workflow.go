@@ -52,10 +52,41 @@ func runPlan(o Options) error {
 
 	fmt.Printf("GitMake Plan · %s\n\n", Version)
 	fmt.Printf("✓ Plan ID              %s\n", p.ID)
+	fmt.Printf("· Working directory    %s\n", p.WorkingDirectory)
+	if p.ConfigPath != "" {
+		fmt.Printf("· Config               %s\n", p.ConfigPath)
+	} else {
+		fmt.Println("· Config               inferred in memory")
+	}
+	fmt.Printf("· Source               %s\n", p.SourcePath)
 	fmt.Printf("✓ Repository           %s · %s\n", p.Repository, p.Mode)
-	fmt.Printf("✓ Source               %s\n", filepath.Base(p.SourcePath))
+	if p.RemoteVisibility != "" {
+		fmt.Printf("· Visibility           config %s · remote %s\n", p.Visibility, p.RemoteVisibility)
+	} else {
+		fmt.Printf("· Visibility           %s\n", p.Visibility)
+	}
 	fmt.Printf("✓ Source SHA-256       %.16s…\n", p.SourceSHA256)
 	fmt.Printf("✓ Changes              +%d ~%d -%d\n", p.Changes.Added, p.Changes.Modified, p.Changes.Deleted)
+	if p.Identity.Status != "" {
+		fmt.Printf("· Project identity     %s", p.Identity.Status)
+		if p.Identity.ProjectID != "" {
+			fmt.Printf(" · %s", p.Identity.ProjectID)
+		}
+		fmt.Println()
+	}
+	if p.Risk.Destructive {
+		fmt.Printf("× Risk                 HIGH · destructive · %.1f%% managed deletion\n", p.Risk.DeletionRatio*100)
+		for _, reason := range p.Risk.Reasons {
+			fmt.Printf("  ! %s\n", reason)
+		}
+	} else if p.Risk.Level != "" && p.Risk.Level != "low" {
+		fmt.Printf("! Risk                 %s\n", strings.ToUpper(p.Risk.Level))
+		for _, reason := range p.Risk.Reasons {
+			fmt.Printf("  ! %s\n", reason)
+		}
+	} else {
+		fmt.Println("✓ Risk                 low")
+	}
 	if p.Release.Enabled {
 		fmt.Printf("· Release              %s · %d assets\n", p.Release.Tag, len(p.Release.Assets))
 	}
@@ -63,8 +94,13 @@ func runPlan(o Options) error {
 	if strings.TrimSpace(output) != "" && o.Verbose {
 		fmt.Println("\nPreview output:\n" + strings.TrimSpace(output))
 	}
-	fmt.Printf("\nReview complete. Local CLI apply:\n  gitmake apply %s\n", p.ID)
-	fmt.Printf("For AI/MCP, create a one-shot approval token first:\n  gitmake approve %s\n", p.ID)
+	if p.Risk.Destructive {
+		fmt.Printf("\nThis plan is destructive. Local CLI apply requires:\n  gitmake apply %s --destructive\n", p.ID)
+		fmt.Printf("For AI/MCP, only a human can mint the destructive token:\n  gitmake approve %s --destructive\n", p.ID)
+	} else {
+		fmt.Printf("\nReview complete. Local CLI apply:\n  gitmake apply %s\n", p.ID)
+		fmt.Printf("For AI/MCP, create a one-shot approval token first:\n  gitmake approve %s\n", p.ID)
+	}
 	return nil
 }
 
@@ -72,6 +108,9 @@ func runApply(o Options) error {
 	p, _, err := planstore.Load(o.PlanID)
 	if err != nil {
 		return err
+	}
+	if p.Risk.Destructive && !o.Destructive {
+		return fmt.Errorf("destructive plan blocked: %d of %d managed files would be deleted (%.1f%%); explicit human approval requires `gitmake apply %s --destructive` or a destructive MCP approval token", p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100, p.ID)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

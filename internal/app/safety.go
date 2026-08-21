@@ -15,8 +15,12 @@ import (
 )
 
 func runApprove(o Options) error {
-	if _, _, err := planstore.Load(o.PlanID); err != nil {
+	p, _, err := planstore.Load(o.PlanID)
+	if err != nil {
 		return err
+	}
+	if p.Risk.Destructive && !o.Destructive {
+		return fmt.Errorf("plan %s is classified as destructive: %d of %d managed files would be deleted (%.1f%%); review provenance and run `gitmake approve %s --destructive` yourself if this is intentional", p.ID, p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100, p.ID)
 	}
 	st, err := os.Stdin.Stat()
 	if err != nil {
@@ -29,7 +33,12 @@ func runApprove(o Options) error {
 	if len(confirm) > 6 {
 		confirm = confirm[len(confirm)-6:]
 	}
-	fmt.Fprintf(os.Stderr, "Approve one MCP apply for plan %s?\n", o.PlanID)
+	if p.Risk.Destructive {
+		confirm = "DESTRUCTIVE-" + confirm
+		fmt.Fprintf(os.Stderr, "DESTRUCTIVE approval for plan %s (%d deletions, %.1f%% of managed baseline).\n", o.PlanID, p.Risk.Deleted, p.Risk.DeletionRatio*100)
+	} else {
+		fmt.Fprintf(os.Stderr, "Approve one MCP apply for plan %s?\n", o.PlanID)
+	}
 	fmt.Fprintf(os.Stderr, "Type %s to confirm: ", confirm)
 	line, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
 	if readErr != nil && strings.TrimSpace(line) == "" {
@@ -38,7 +47,7 @@ func runApprove(o Options) error {
 	if strings.TrimSpace(line) != confirm {
 		return fmt.Errorf("approval cancelled")
 	}
-	token, expires, err := approval.Create(o.PlanID)
+	token, expires, err := approval.Create(o.PlanID, p.Risk.Destructive)
 	if err != nil {
 		return fmt.Errorf("create approval token: %w", err)
 	}
@@ -46,13 +55,16 @@ func runApprove(o Options) error {
 		return emitJSON(map[string]any{
 			"schema": "gitmake.approval/v1", "ok": true, "plan_id": o.PlanID,
 			"approval_token": token, "expires_at": expires,
-			"single_use": true,
+			"single_use": true, "destructive": p.Risk.Destructive,
 		})
 	}
 	fmt.Printf("GitMake Approval · %s\n\n", Version)
 	fmt.Printf("✓ Plan                 %s\n", o.PlanID)
 	fmt.Printf("✓ One-shot token       %s\n", token)
 	fmt.Printf("· Expires              %s\n", expires.Local().Format("2006-01-02 15:04:05"))
+	if p.Risk.Destructive {
+		fmt.Println("! Approval class       DESTRUCTIVE")
+	}
 	fmt.Println("\nGive this token only to the AI/tool that should apply this reviewed plan.")
 	fmt.Println("It becomes unusable after one successful MCP apply.")
 	return nil

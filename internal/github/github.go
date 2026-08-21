@@ -21,6 +21,7 @@ type defaultBranchRef struct {
 type RepoInfo struct {
 	NameWithOwner    string            `json:"nameWithOwner"`
 	URL              string            `json:"url"`
+	Visibility       string            `json:"visibility"`
 	DefaultBranchRef *defaultBranchRef `json:"defaultBranchRef"`
 }
 
@@ -66,7 +67,7 @@ var notFoundRE = regexp.MustCompile(`(?i)(HTTP\s*404|repository\s+not\s+found|co
 
 func (c Client) Repo(owner, name string) (RepoInfo, bool, error) {
 	target := owner + "/" + name
-	res, err := c.Run.Run("", "gh", "repo", "view", target, "--json", "nameWithOwner,url,defaultBranchRef")
+	res, err := c.Run.Run("", "gh", "repo", "view", target, "--json", "nameWithOwner,url,visibility,defaultBranchRef")
 	if err != nil {
 		return RepoInfo{}, false, err
 	}

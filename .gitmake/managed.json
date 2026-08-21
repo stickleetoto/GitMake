@@ -31,6 +31,8 @@
     "internal/app/mcp.go",
     "internal/app/mcp_test.go",
     "internal/app/release.go",
+    "internal/app/risk.go",
+    "internal/app/risk_test.go",
     "internal/app/safety.go",
     "internal/app/workflow.go",
     "internal/approval/approval.go",
@@ -55,6 +57,8 @@
     "internal/installer/status_test.go",
     "internal/pathmatch/match.go",
     "internal/planstore/planstore.go",
+    "internal/projectid/projectid.go",
+    "internal/projectid/projectid_test.go",
     "internal/runner/runner.go",
     "internal/securityscan/scan.go",
     "internal/securityscan/scan_test.go",
@@ -72,6 +76,7 @@
     "scripts/e2e_v052.sh",
     "scripts/e2e_v06.sh",
     "scripts/e2e_v061.sh",
-    "scripts/e2e_v07.sh"
+    "scripts/e2e_v07.sh",
+    "scripts/e2e_v072.sh"
   ]
 }

@@ -60,6 +60,18 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 		out.Code = "REMOTE_MOVED"
 		out.Recoverable = true
 		out.SuggestedAction = "Create a fresh GitMake plan; the remote branch changed."
+	case strings.Contains(lower, "project identity mismatch"):
+		out.Code = "PROJECT_IDENTITY_MISMATCH"
+		out.Recoverable = false
+		out.SuggestedAction = "Stop and verify the working directory, gitmake.json, source ZIP, and target repository. Do not override this binding automatically."
+	case strings.Contains(lower, "destructive change blocked") || strings.Contains(lower, "destructive plan blocked") || strings.Contains(lower, "classified as destructive"):
+		out.Code = "DESTRUCTIVE_CHANGE_BLOCKED"
+		out.Recoverable = true
+		out.SuggestedAction = "Review the plan provenance and deletion ratio. If intentional, a human must use --destructive explicitly."
+	case strings.Contains(lower, "refusing to retarget repository"):
+		out.Code = "PROJECT_SOURCE_MISMATCH"
+		out.Recoverable = true
+		out.SuggestedAction = "Verify the project directory and update source.zip explicitly; GitMake will not retarget an existing repository config to a different lone ZIP."
 	case strings.Contains(lower, "approval token") || strings.Contains(lower, "one-shot approval"):
 		out.Code = "APPROVAL_REQUIRED"
 		out.Recoverable = true
@@ -113,18 +125,21 @@ func fingerprintState(s *PipelineState) (string, error) {
 		return "", fmt.Errorf("pipeline state is missing")
 	}
 	payload := struct {
-		Repository   string        `json:"repository"`
-		Visibility   string        `json:"visibility"`
-		Mode         string        `json:"mode"`
-		Branch       string        `json:"branch"`
-		SourceSHA256 string        `json:"source_sha256"`
-		BaseCommit   string        `json:"base_commit"`
-		Changes      *ChangeCounts `json:"changes"`
-		Release      *ReleaseState `json:"release"`
-		ConfigSHA256 string        `json:"config_sha256"`
+		Repository       string         `json:"repository"`
+		Visibility       string         `json:"visibility"`
+		RemoteVisibility string         `json:"remote_visibility"`
+		Mode             string         `json:"mode"`
+		Branch           string         `json:"branch"`
+		SourceSHA256     string         `json:"source_sha256"`
+		BaseCommit       string         `json:"base_commit"`
+		Changes          *ChangeCounts  `json:"changes"`
+		Release          *ReleaseState  `json:"release"`
+		Identity         *IdentityState `json:"identity"`
+		Risk             *RiskState     `json:"risk"`
+		ConfigSHA256     string         `json:"config_sha256"`
 	}{
-		Repository: s.Repository, Visibility: s.Visibility, Mode: s.Mode, Branch: s.Branch,
-		SourceSHA256: s.SourceSHA256, BaseCommit: s.BaseCommit, Changes: s.Changes, Release: s.Release,
+		Repository: s.Repository, Visibility: s.Visibility, RemoteVisibility: s.RemoteVisibility, Mode: s.Mode, Branch: s.Branch,
+		SourceSHA256: s.SourceSHA256, BaseCommit: s.BaseCommit, Changes: s.Changes, Release: s.Release, Identity: s.Identity, Risk: s.Risk,
 	}
 	if s.Config != nil {
 		payload.ConfigSHA256 = s.Config.SHA256
@@ -148,7 +163,7 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 	p := planstore.Plan{
 		Schema: planstore.Schema, ID: id, WorkingDirectory: cwd,
 		SourcePath: s.SourcePath, SourceSHA256: s.SourceSHA256,
-		Repository: s.Repository, Visibility: s.Visibility, Mode: s.Mode, Branch: s.Branch,
+		Repository: s.Repository, Visibility: s.Visibility, RemoteVisibility: s.RemoteVisibility, Mode: s.Mode, Branch: s.Branch,
 		BaseCommit:  s.BaseCommit,
 		Changes:     planstore.ChangeCounts{Added: s.Changes.Added, Modified: s.Changes.Modified, Deleted: s.Changes.Deleted},
 		Fingerprint: fp,
@@ -157,6 +172,16 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 		p.ConfigPath = s.Config.Path
 		p.ConfigPersisted = s.Config.Persisted
 		p.ConfigSHA256 = s.Config.SHA256
+	}
+	if s.Identity != nil {
+		p.Identity = planstore.ProjectIdentity{Status: s.Identity.Status, ProjectID: s.Identity.ProjectID, Repository: s.Identity.Repository}
+	}
+	if s.Risk != nil {
+		p.Risk = planstore.Risk{Level: s.Risk.Level, Destructive: s.Risk.Destructive, DeletionRatio: s.Risk.DeletionRatio, Deleted: s.Risk.Deleted, ManagedBaseline: s.Risk.ManagedBaseline, Reasons: append([]string(nil), s.Risk.Reasons...)}
+	}
+	p.ReviewNotes = []string{
+		"Verify working_directory, config_path, source_path, and repository before approval.",
+		"A destructive plan requires a separate --destructive human approval and cannot use a normal approval token.",
 	}
 	if s.Release != nil {
 		p.Release.Enabled = s.Release.Enabled

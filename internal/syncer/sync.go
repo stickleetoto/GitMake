@@ -14,6 +14,7 @@ import (
 )
 
 const manifestRelative = ".gitmake/managed.json"
+const projectIdentityRelative = ".gitmake/project.json"
 const manifestSchema = "gitmake.managed/v1"
 
 type Manifest struct {
@@ -22,7 +23,8 @@ type Manifest struct {
 }
 
 type Result struct {
-	ManagedFiles int      `json:"managed_files"`
+	ManagedFiles int
+	PriorManaged int      `json:"managed_files"`
 	Deleted      []string `json:"deleted,omitempty"`
 	Preserved    []string `json:"preserved,omitempty"`
 	Manifest     string   `json:"manifest"`
@@ -53,8 +55,8 @@ func PrepareCreateSnapshot(source string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if containsFold(files, manifestRelative) {
-		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path %s", manifestRelative)
+	if containsFold(files, manifestRelative) || containsFold(files, projectIdentityRelative) {
+		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path under .gitmake")
 	}
 	if err := writeManifest(source, files); err != nil {
 		return Result{}, err
@@ -67,8 +69,8 @@ func managedSync(source, repo string, protected []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if containsFold(current, manifestRelative) {
-		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path %s", manifestRelative)
+	if containsFold(current, manifestRelative) || containsFold(current, projectIdentityRelative) {
+		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path under .gitmake")
 	}
 	prior, exists, err := loadManifest(repo)
 	if err != nil {
@@ -76,6 +78,9 @@ func managedSync(source, repo string, protected []string) (Result, error) {
 	}
 	currentSet := toSet(current)
 	result := Result{ManagedFiles: len(current), Manifest: manifestRelative, FirstAdopt: !exists}
+	if exists {
+		result.PriorManaged = len(prior.Managed)
+	}
 
 	if exists {
 		for _, rel := range prior.Managed {
@@ -122,8 +127,8 @@ func snapshotSync(source, repo string, protected []string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if containsFold(sourceFiles, manifestRelative) {
-		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path %s", manifestRelative)
+	if containsFold(sourceFiles, manifestRelative) || containsFold(sourceFiles, projectIdentityRelative) {
+		return Result{}, fmt.Errorf("source snapshot contains reserved GitMake metadata path under .gitmake")
 	}
 	result := Result{ManagedFiles: len(sourceFiles), Manifest: manifestRelative}
 	currentSet := toSet(sourceFiles)

@@ -345,10 +345,15 @@ func ResolveProjectZIP(configPath string, c *Config) (zipPath string, repaired b
 		return "", false, err
 	}
 	if len(zips) == 1 {
-		c.Source.ZIP = zips[0]
-		if isPlaceholderRepo(c.Repo.Name) {
-			c.Repo.Name = deriveRepoName(zips[0])
+		// Only starter/placeholder configs may self-heal to a newly arrived ZIP.
+		// Retargeting a real repository config to an unrelated lone archive is
+		// destructive: an old gitmake.json beside a new ZIP could otherwise
+		// turn an UPDATE into a mass deletion. Require explicit config editing.
+		if !isPlaceholderRepo(c.Repo.Name) {
+			return "", false, fmt.Errorf("configured source ZIP %q was not found; refusing to retarget repository %s to %q automatically; update source.zip explicitly or run GitMake in the intended project directory", configured, c.Repo.Name, zips[0])
 		}
+		c.Source.ZIP = zips[0]
+		c.Repo.Name = deriveRepoName(zips[0])
 		if err := Save(configPath, *c); err != nil {
 			return "", false, err
 		}

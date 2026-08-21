@@ -1,3 +1,16 @@
+## v0.7.2 — Project Identity + Destructive Change Gate
+
+- Added protected repository identity metadata in `.gitmake/project.json` and validation before updates.
+- Added `PROJECT_IDENTITY_MISMATCH` hard-stop behavior for conflicting repository bindings.
+- Stopped automatic retargeting of a real repository config when its configured ZIP is missing and an unrelated lone ZIP is present (`PROJECT_SOURCE_MISMATCH`). Starter placeholder configs still self-heal.
+- Plans now surface working directory, config path, source path, target repository, remote visibility, project identity, change counts, deletion ratio, and risk classification.
+- Added destructive-change classification when at least 10 managed files and at least 30% of the prior managed baseline would be deleted.
+- Direct publish and ordinary apply are blocked for destructive plans. Local apply requires `--destructive`.
+- MCP destructive apply requires a separately human-minted `gitmake approve <plan_id> --destructive` one-shot token; normal approval tokens are rejected.
+- Added explicit config-vs-remote visibility mismatch reporting without changing existing repository visibility.
+- Added ZIP-only MCP E2E coverage: inspect → config suggest → config write → plan with no hand-authored config.
+- Added v0.7.2 safety E2E coverage for stale-source retarget refusal, destructive plan gating, destructive token replay rejection, identity tamper detection, and plan provenance.
+
 ## v0.7.1
 
 - Fix self-publish false positives caused by secret-scanner unit-test fixtures containing literal private-key/token signatures.

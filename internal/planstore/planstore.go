@@ -30,24 +30,43 @@ type Release struct {
 	NotesSHA256 string       `json:"notes_sha256,omitempty"`
 }
 
+type ProjectIdentity struct {
+	Status     string `json:"status"`
+	ProjectID  string `json:"project_id,omitempty"`
+	Repository string `json:"repository,omitempty"`
+}
+
+type Risk struct {
+	Level           string   `json:"level"`
+	Destructive     bool     `json:"destructive"`
+	DeletionRatio   float64  `json:"deletion_ratio"`
+	Deleted         int      `json:"deleted"`
+	ManagedBaseline int      `json:"managed_baseline"`
+	Reasons         []string `json:"reasons,omitempty"`
+}
+
 type Plan struct {
-	Schema           string       `json:"schema"`
-	ID               string       `json:"plan_id"`
-	CreatedAt        time.Time    `json:"created_at"`
-	WorkingDirectory string       `json:"working_directory"`
-	ConfigPath       string       `json:"config_path,omitempty"`
-	ConfigPersisted  bool         `json:"config_persisted"`
-	ConfigSHA256     string       `json:"config_sha256,omitempty"`
-	SourcePath       string       `json:"source_path"`
-	SourceSHA256     string       `json:"source_sha256"`
-	Repository       string       `json:"repository"`
-	Visibility       string       `json:"visibility"`
-	Mode             string       `json:"mode"`
-	Branch           string       `json:"branch"`
-	BaseCommit       string       `json:"base_commit,omitempty"`
-	Changes          ChangeCounts `json:"changes"`
-	Release          Release      `json:"release"`
-	Fingerprint      string       `json:"fingerprint"`
+	Schema           string          `json:"schema"`
+	ID               string          `json:"plan_id"`
+	CreatedAt        time.Time       `json:"created_at"`
+	WorkingDirectory string          `json:"working_directory"`
+	ConfigPath       string          `json:"config_path,omitempty"`
+	ConfigPersisted  bool            `json:"config_persisted"`
+	ConfigSHA256     string          `json:"config_sha256,omitempty"`
+	SourcePath       string          `json:"source_path"`
+	SourceSHA256     string          `json:"source_sha256"`
+	Repository       string          `json:"repository"`
+	Visibility       string          `json:"visibility"`
+	RemoteVisibility string          `json:"remote_visibility,omitempty"`
+	Mode             string          `json:"mode"`
+	Branch           string          `json:"branch"`
+	BaseCommit       string          `json:"base_commit,omitempty"`
+	Changes          ChangeCounts    `json:"changes"`
+	Release          Release         `json:"release"`
+	Identity         ProjectIdentity `json:"project_identity"`
+	Risk             Risk            `json:"risk"`
+	ReviewNotes      []string        `json:"review_notes,omitempty"`
+	Fingerprint      string          `json:"fingerprint"`
 }
 
 func NewID() (string, error) {

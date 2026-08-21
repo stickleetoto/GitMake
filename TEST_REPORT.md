@@ -1,64 +1,53 @@
-# GitMake v0.7.1 Test Report
+# GitMake v0.7.2 Test Report
 
-Status: **PASS** for the implemented v0.7.1 scope.
+Status: **PASS** for the implemented v0.7.2 scope.
 
-## Focus
+## Static / unit verification
 
-v0.7.1 closes seven safety/portability gaps: managed sync ownership, secret scanning, one-shot AI approval, self-contained MCP inspection/config planning, conservative multi-ZIP discovery, GitHub preflight constraints, and cross-platform/generic MCP support.
+- `go test ./...` — PASS
+- `go vet ./...` — PASS
+- `go test -race ./...` — PASS
+- project identity unit tests — PASS
+- destructive risk classification unit tests — PASS
+- destructive approval record unit test — PASS
+- stale real-config source retarget refusal test — PASS
 
 ## Regression suites
 
-The release candidate is validated with:
+- base E2E — PASS
+- v0.3 E2E — PASS
+- v0.4 E2E — PASS
+- v0.5 E2E — PASS
+- v0.5.1 E2E — PASS
+- v0.5.2 E2E — PASS
+- v0.6 MCP E2E — PASS
+- v0.6.1 AI setup E2E — PASS
+- v0.7 safety E2E — PASS
 
-```text
-go test ./...
-go vet ./...
-go test -race ./...
-scripts/e2e.sh
-scripts/e2e_v03.sh
-scripts/e2e_v04.sh
-scripts/e2e_v05.sh
-scripts/e2e_v051.sh
-scripts/e2e_v052.sh
-scripts/e2e_v06.sh
-scripts/e2e_v061.sh
-scripts/e2e_v07.sh
-```
+## v0.7.2 safety E2E
 
-## v0.7-specific E2E coverage
+`scripts/e2e_v072.sh` — PASS
 
-1. Managed sync first adoption preserves remote-only files.
-2. Later managed updates remove files GitMake previously owned but no longer receives.
-3. Protected paths survive snapshot-style updates.
-4. Likely secrets are blocked before a remote repository is created or modified.
-5. Configurable direct-Git file limits block oversized files.
-6. LFS-marked oversized files require `git lfs` availability.
-7. Required-PR branch protection blocks the direct-push workflow without creating an extra commit.
-8. An existing bare Git tag blocks accidental release creation against an unreviewed tag.
-9. An obvious binary/release-only ZIP is not silently selected as project source.
-10. Generic MCP registration descriptor is emitted without modifying unknown client configuration.
-11. Unix install uses `~/.local/bin/gitmake` and idempotently manages the shell PATH snippet.
-12. A real PTY-backed human approval creates a one-shot token; MCP apply succeeds once and token replay is rejected.
-13. Existing plan/apply stale-input and remote-baseline checks remain enforced.
-14. Existing v0.1–v0.6.1 workflows remain covered by regression suites.
+Verified:
+
+1. A non-placeholder repository config is not auto-retargeted from a missing configured ZIP to an unrelated lone ZIP.
+2. New repositories receive `.gitmake/project.json`.
+3. Plan provenance reports exact working directory, config path, source path, target repository, remote visibility, project identity, and risk.
+4. Config-private / remote-public mismatch is reported while remote visibility remains unchanged.
+5. Deleting more than 30% and at least 10 files from the managed baseline is classified destructive.
+6. Direct publish is blocked for destructive changes.
+7. Ordinary `gitmake apply` is blocked for a destructive plan.
+8. Ordinary approval cannot mint a token for a destructive plan.
+9. Interactive `gitmake approve <id> --destructive` creates a destructive-class one-shot token.
+10. MCP apply accepts that token once and rejects replay.
+11. Tampering project identity to another valid repository binding produces `PROJECT_IDENTITY_MISMATCH`.
+12. ZIP-only MCP authoring works end-to-end through inspect → config suggest → config write → plan without a hand-authored config.
 
 ## Safety invariants
 
 - no force push
 - no history rewrite
 - no repository deletion
-- source ZIP may not inject `.git`
-- ZIP traversal/symlink/Windows-invalid-name defenses remain active
-- secret and large-file preflight occurs before Git/GitHub mutation
-- managed sync does not claim arbitrary remote-only files on first adoption
-- branch protection requiring PRs is not bypassed
-- bare tag conflicts are not silently reused
-- MCP cannot mint its own approval token
-- approval tokens expire, are plan-bound, and are single-use
-- apply revalidates reviewed state before mutation
-
-## Platform build targets
-
-Release packaging builds/tests the Go source on the host and cross-compiles CLI binaries for Windows amd64, Linux amd64, macOS amd64, and macOS arm64. `GitMake-Setup.exe` remains the Windows convenience installer; Unix-like systems use `gitmake install`.
-
-Native UI execution for every target OS is not available in the build container; platform-specific install logic is unit/E2E tested where possible and cross-compilation is verified.
+- MCP cannot mint approval tokens
+- destructive MCP apply cannot use a normal approval token
+- source/config/remote changes invalidate reviewed plans

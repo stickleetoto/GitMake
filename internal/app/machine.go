@@ -10,27 +10,30 @@ import (
 )
 
 type PipelineState struct {
-	Stage           string          `json:"stage,omitempty"`
-	CompletedStages []string        `json:"completed_stages,omitempty"`
-	Mode            string          `json:"mode,omitempty"`
-	Repository      string          `json:"repository,omitempty"`
-	Visibility      string          `json:"visibility,omitempty"`
-	Branch          string          `json:"branch,omitempty"`
-	Source          string          `json:"source,omitempty"`
-	SourcePath      string          `json:"source_path,omitempty"`
-	SourceSHA256    string          `json:"source_sha256,omitempty"`
-	BaseCommit      string          `json:"base_commit,omitempty"`
-	PlanID          string          `json:"plan_id,omitempty"`
-	Files           int             `json:"files,omitempty"`
-	Changes         *ChangeCounts   `json:"changes,omitempty"`
-	RepositoryURL   string          `json:"repository_url,omitempty"`
-	Release         *ReleaseState   `json:"release,omitempty"`
-	DryRun          bool            `json:"dry_run,omitempty"`
-	ReadOnly        bool            `json:"read_only,omitempty"`
-	Config          *ConfigState    `json:"config,omitempty"`
-	Discovery       *DiscoveryState `json:"discovery,omitempty"`
-	Security        *SecurityState  `json:"security,omitempty"`
-	Sync            *SyncState      `json:"sync,omitempty"`
+	Stage            string          `json:"stage,omitempty"`
+	CompletedStages  []string        `json:"completed_stages,omitempty"`
+	Mode             string          `json:"mode,omitempty"`
+	Repository       string          `json:"repository,omitempty"`
+	Visibility       string          `json:"visibility,omitempty"`
+	RemoteVisibility string          `json:"remote_visibility,omitempty"`
+	Branch           string          `json:"branch,omitempty"`
+	Source           string          `json:"source,omitempty"`
+	SourcePath       string          `json:"source_path,omitempty"`
+	SourceSHA256     string          `json:"source_sha256,omitempty"`
+	BaseCommit       string          `json:"base_commit,omitempty"`
+	PlanID           string          `json:"plan_id,omitempty"`
+	Files            int             `json:"files,omitempty"`
+	Changes          *ChangeCounts   `json:"changes,omitempty"`
+	RepositoryURL    string          `json:"repository_url,omitempty"`
+	Release          *ReleaseState   `json:"release,omitempty"`
+	DryRun           bool            `json:"dry_run,omitempty"`
+	ReadOnly         bool            `json:"read_only,omitempty"`
+	Config           *ConfigState    `json:"config,omitempty"`
+	Discovery        *DiscoveryState `json:"discovery,omitempty"`
+	Security         *SecurityState  `json:"security,omitempty"`
+	Sync             *SyncState      `json:"sync,omitempty"`
+	Identity         *IdentityState  `json:"identity,omitempty"`
+	Risk             *RiskState      `json:"risk,omitempty"`
 }
 
 type SecurityState struct {
@@ -57,10 +60,27 @@ type LargeFileState struct {
 
 type SyncState struct {
 	Mode         string   `json:"mode"`
+	PriorManaged int      `json:"prior_managed"`
 	ManagedFiles int      `json:"managed_files"`
 	FirstAdopt   bool     `json:"first_adopt"`
 	Deleted      []string `json:"deleted,omitempty"`
 	Preserved    []string `json:"preserved,omitempty"`
+}
+
+type IdentityState struct {
+	Schema     string `json:"schema,omitempty"`
+	ProjectID  string `json:"project_id,omitempty"`
+	Repository string `json:"repository,omitempty"`
+	Status     string `json:"status"`
+}
+
+type RiskState struct {
+	Level           string   `json:"level"`
+	Destructive     bool     `json:"destructive"`
+	DeletionRatio   float64  `json:"deletion_ratio"`
+	Deleted         int      `json:"deleted"`
+	ManagedBaseline int      `json:"managed_baseline"`
+	Reasons         []string `json:"reasons,omitempty"`
 }
 
 type ConfigState struct {
