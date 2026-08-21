@@ -22,26 +22,28 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.5.2"
+const Version = "0.6.1"
 
 type Options struct {
-	Command      string
-	ConfigPath   string
-	SourceArg    string
-	DryRun       bool
-	Verbose      bool
-	KeepTemp     bool
-	CreateOnly   bool
-	UpdateOnly   bool
-	NoRelease    bool
-	VersionOnly  bool
-	Yes          bool
-	JSON         bool
-	ReadOnly     bool
-	PlanID       string
-	ConfigAction string
-	Stdin        bool
-	State        *PipelineState
+	Command       string
+	ConfigPath    string
+	SourceArg     string
+	DryRun        bool
+	Verbose       bool
+	KeepTemp      bool
+	CreateOnly    bool
+	UpdateOnly    bool
+	NoRelease     bool
+	VersionOnly   bool
+	Yes           bool
+	JSON          bool
+	ReadOnly      bool
+	PlanID        string
+	ConfigAction  string
+	Stdin         bool
+	MCPAllowWrite bool
+	AIWrite       bool
+	State         *PipelineState
 }
 
 func Main(args []string) int {
@@ -64,9 +66,9 @@ func Main(args []string) int {
 		return 0
 	}
 
-	// AI subcommands own their JSON schema because agents consume these files
-	// directly as capability/installation metadata.
-	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "discover" || opts.Command == "plan" || opts.Command == "history" || opts.Command == "config") {
+	// AI/config/discovery subcommands own their JSON schema because agents consume
+	// these files directly as capability/installation metadata.
+	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "ai-setup" || opts.Command == "ai-status" || opts.Command == "ai-remove" || opts.Command == "discover" || opts.Command == "plan" || opts.Command == "history" || opts.Command == "config") {
 		if err := Run(opts); err != nil {
 			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: classifyMachineError(err, opts.State)})
 			return 1
@@ -151,20 +153,26 @@ func parseArgs(args []string) (Options, error) {
 			args = args[2:]
 		} else if args[0] == "ai" {
 			if len(args) < 2 {
-				return Options{}, errors.New("usage: gitmake ai <describe|install>")
+				return Options{}, errors.New("usage: gitmake ai <describe|install|setup|status|remove>")
 			}
 			switch args[1] {
 			case "describe":
 				o.Command = "ai-describe"
 			case "install":
 				o.Command = "ai-install"
+			case "setup":
+				o.Command = "ai-setup"
+			case "status":
+				o.Command = "ai-status"
+			case "remove":
+				o.Command = "ai-remove"
 			default:
-				return Options{}, fmt.Errorf("unknown AI command %q (expected describe or install)", args[1])
+				return Options{}, fmt.Errorf("unknown AI command %q (expected describe, install, setup, status, or remove)", args[1])
 			}
 			args = args[2:]
 		} else {
 			switch args[0] {
-			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "history":
+			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "history", "mcp":
 				o.Command = args[0]
 				args = args[1:]
 			}
@@ -190,12 +198,20 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.JSON, "json", false, "emit machine-readable JSON output")
 	fs.BoolVar(&o.ReadOnly, "read-only", false, "block project/GitHub mutations; publish requires --dry-run")
 	fs.BoolVar(&o.Stdin, "stdin", false, "read config JSON or patch JSON from standard input")
+	fs.BoolVar(&o.MCPAllowWrite, "allow-write", false, "expose mutating tools in MCP mode")
+	fs.BoolVar(&o.AIWrite, "write", false, "configure Claude Code with reviewed GitMake write tools")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
 	}
 	rest := fs.Args()
 	if o.CreateOnly && o.UpdateOnly {
 		return Options{}, errors.New("--create-only and --update-only cannot be used together")
+	}
+	if o.AIWrite && o.Command != "ai-setup" {
+		return Options{}, errors.New("--write is only valid with `gitmake ai setup`")
+	}
+	if o.MCPAllowWrite && o.Command != "mcp" {
+		return Options{}, errors.New("--allow-write is only valid with `gitmake mcp`")
 	}
 
 	switch o.Command {
@@ -225,7 +241,7 @@ func parseArgs(args []string) (Options, error) {
 		if (o.ConfigAction == "write" || o.ConfigAction == "patch") && !o.Stdin {
 			return Options{}, fmt.Errorf("gitmake config %s requires --stdin", o.ConfigAction)
 		}
-	case "doctor", "install", "upgrade", "help", "discover", "history", "ai-describe", "ai-install":
+	case "doctor", "install", "upgrade", "help", "discover", "history", "mcp", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
 		}
@@ -262,7 +278,7 @@ func normalizeFlagOrder(args []string) []string {
 func Run(o Options) error {
 	if o.ReadOnly {
 		switch o.Command {
-		case "install", "upgrade", "init", "ai-install", "apply":
+		case "install", "upgrade", "init", "ai-install", "ai-setup", "ai-remove", "apply":
 			return fmt.Errorf("read-only mode blocks `gitmake %s`", strings.ReplaceAll(o.Command, "ai-", "ai "))
 		case "config":
 			if o.ConfigAction == "write" || o.ConfigAction == "patch" {
@@ -288,6 +304,8 @@ func Run(o Options) error {
 		return runApply(o)
 	case "history":
 		return runHistory(o)
+	case "mcp":
+		return runMCP(o)
 	case "config":
 		return runConfig(o)
 	case "install":
@@ -300,6 +318,12 @@ func Run(o Options) error {
 		return runAIDescribe(o)
 	case "ai-install":
 		return runAIInstall(o)
+	case "ai-setup":
+		return runAISetup(o)
+	case "ai-status":
+		return runAIStatus(o)
+	case "ai-remove":
+		return runAIRemove(o)
 	default:
 		return runPublish(o)
 	}
@@ -317,6 +341,7 @@ Usage:
   gitmake plan [Project.zip]  Create an immutable reviewed publish plan
   gitmake apply <plan_id>     Revalidate and apply a previously reviewed plan
   gitmake history             Show recent GitMake publish/apply operations
+  gitmake mcp                 Run the local MCP server (read-only tools by default)
   gitmake config schema       Print the machine-readable config schema
   gitmake config validate     Validate gitmake.json
   gitmake config write --stdin  Validate and write config JSON from stdin
@@ -325,6 +350,9 @@ Usage:
   gitmake upgrade             Upgrade GitMake from its latest GitHub Release
   gitmake ai describe         Explain GitMake capabilities to AI agents
   gitmake ai install          Install managed AGENTS.md + .gitmake/ai.json guidance
+  gitmake ai setup            Connect GitMake MCP to Claude Code (read-only by default)
+  gitmake ai status           Show Claude Code / GitMake MCP connection status
+  gitmake ai remove           Remove the user-scoped Claude Code MCP registration
 
 Common options:
   --dry-run       Preview without changing GitHub
@@ -333,6 +361,8 @@ Common options:
   --yes           Accept safe setup defaults (mainly for gitmake init)
   --json          Emit machine-readable JSON
   --read-only     Block mutations; combine with --dry-run for safe AI previews
+  --allow-write   In MCP mode, expose config write/patch and approved plan apply tools
+  --write         With gitmake ai setup, enable reviewed AI write tools
   --version       Print GitMake version
 
 Safety:

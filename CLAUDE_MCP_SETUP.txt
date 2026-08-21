@@ -1,0 +1,32 @@
+GitMake v0.6.1 + Claude Code
+=============================
+
+Recommended setup:
+
+  gitmake ai setup
+
+That command:
+  - detects Claude Code
+  - ensures GitMake uses a stable installed executable on Windows
+  - registers a user-scoped stdio MCP server named `gitmake`
+  - keeps access read-only by default
+  - verifies the resulting registration/status
+
+Check:
+
+  gitmake ai status
+
+Enable reviewed write tools only when intentionally needed:
+
+  gitmake ai setup --write
+
+The write-enabled registration still exposes only validated config write/patch
+and reviewed-plan apply. It does not expose force-push, repository deletion,
+history rewriting, or an unreviewed direct publish tool.
+
+Remove:
+
+  gitmake ai remove
+
+Advanced/manual registration is still possible with `gitmake mcp`, but normal
+Claude Code users should not need to remember the raw `claude mcp add` command.

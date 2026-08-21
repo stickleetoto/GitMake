@@ -1,16 +1,16 @@
-# GitMake v0.5.2 — Agent Hardening
+# GitMake v0.6.1
 
-v0.5.2 makes GitMake safer and easier for terminal-capable AI agents to operate.
+GitMake v0.6.1 turns Claude Code MCP setup into a one-command flow.
 
-Highlights:
+## Highlights
 
-- LLMs can read the authoritative `gitmake.json` schema with `gitmake config schema --json`.
-- Full configs and partial patches can be supplied through stdin, strictly validated, previewed, and safely written.
-- `gitmake plan` / `gitmake apply` binds user approval to SHA-256 fingerprints and the current remote state.
-- multi-ZIP discovery now exposes confidence and evidence for its source choice.
-- structured error codes help agents recover without parsing prose.
-- `release.on_existing="resume"` recovers missing release assets.
-- `gitmake history` records recent publish/apply outcomes.
-- self-upgrade now verifies the downloaded Windows package against a published SHA-256 checksum before replacement.
+- `gitmake ai setup` detects Claude Code and registers GitMake MCP automatically.
+- Read-only access is the default.
+- `gitmake ai setup --write` explicitly enables only validated config write/patch and reviewed plan apply tools.
+- `gitmake ai status` shows registration, access mode, command path, scope, and connection health.
+- `gitmake ai remove` cleanly removes the GitMake-managed user-scope registration.
+- Windows AI setup uses the stable installed GitMake executable instead of a temporary portable path.
+- `GitMake-Setup.exe` automatically connects Claude Code read-only when available.
+- Existing correct registrations are left untouched, and GitMake refuses to remove/replace same-named project/local MCP servers.
 
-GitMake still intentionally stays small: it handles project snapshot → repository → optional release publishing and leaves general GitHub administration to Git/GitHub CLI or dedicated tools.
+Manual `gitmake mcp` remains available for other MCP clients and advanced setups.

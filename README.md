@@ -1,8 +1,8 @@
-# GitMake v0.5.2
+# GitMake v0.6.1
 
 GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command.
 
-v0.5.2 hardens the Agent Interface so LLMs can discover GitMake, author `gitmake.json` from an authoritative schema, review an immutable publish plan, and apply it only if the reviewed inputs are still current.
+v0.6.1 makes the MCP layer one-click for Claude Code: `gitmake ai setup` detects Claude, registers the user-scoped GitMake MCP server, keeps it read-only by default, and verifies the resulting connection. The raw MCP server remains available for other clients.
 
 ```powershell
 gitmake
@@ -92,6 +92,75 @@ gitmake --dry-run --read-only --json
 ```
 
 When no `gitmake.json` exists, read-only preview may infer safe defaults in memory. It does not persist a config or mutate GitHub.
+
+
+## Claude Code: one-command AI setup
+
+Recommended:
+
+```powershell
+gitmake ai setup
+```
+
+GitMake detects Claude Code, ensures a stable GitMake executable path on Windows, registers the user-scoped stdio MCP server, and verifies the registration. Access is read-only by default.
+
+```powershell
+gitmake ai status
+gitmake ai remove
+```
+
+To deliberately enable the guarded mutation surface:
+
+```powershell
+gitmake ai setup --write
+```
+
+`--write` requires confirmation unless `--yes` is explicitly supplied. GitMake only manages its own user-scoped `gitmake` registration and refuses to replace/remove a same-named project/local server.
+
+`GitMake-Setup.exe` also performs the read-only Claude connection automatically when Claude Code is detected.
+
+## MCP integration (advanced / other clients)
+
+Run GitMake as a local MCP stdio server directly:
+
+```powershell
+gitmake mcp
+```
+
+The default MCP toolset is intentionally read-only. It exposes:
+
+```text
+gitmake_describe
+gitmake_doctor
+gitmake_discover
+gitmake_config_schema
+gitmake_config_validate
+gitmake_preview
+gitmake_plan
+gitmake_history
+```
+
+To intentionally expose the guarded mutation surface:
+
+```powershell
+gitmake mcp --allow-write
+```
+
+This adds only:
+
+```text
+gitmake_config_write
+gitmake_config_patch
+gitmake_apply
+```
+
+There is no MCP force-push, repository deletion, history rewrite, or direct unreviewed publish tool. `gitmake_apply` requires a previously reviewed plan and still rejects stale source/config/remote state.
+
+Claude Code users normally should use `gitmake ai setup` instead of composing raw MCP registration commands.
+
+GitMake also honors `GITMAKE_PROJECT_DIR` as an MCP project-root override. When launched by Claude Code, `CLAUDE_PROJECT_DIR` is used automatically when no explicit `project_dir` tool argument is supplied.
+
+The stdio server accepts modern MCP clients that call `tools/list` directly and also implements the legacy `initialize` handshake for compatibility.
 
 ## LLM-authored configuration
 
@@ -228,6 +297,12 @@ gitmake config patch --stdin    Merge + validate a config patch
 
 gitmake ai describe             Describe capabilities for agents
 gitmake ai install              Install repository-local AI guidance
+gitmake ai setup                Auto-connect Claude Code read-only
+gitmake ai setup --write        Enable reviewed write tools after confirmation
+gitmake ai status               Show Claude/MCP status
+gitmake ai remove               Remove GitMake Claude MCP registration
+gitmake mcp                     Run read-only MCP stdio server manually
+gitmake mcp --allow-write       Expose guarded config/apply MCP tools manually
 
 gitmake install                 Install for current Windows user
 gitmake upgrade                 Upgrade from latest GitMake release
@@ -244,6 +319,7 @@ Common flags may appear before or after a positional argument:
 --no-release
 --verbose
 --yes
+--write
 --keep-temp
 --create-only
 --update-only

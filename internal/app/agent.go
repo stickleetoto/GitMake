@@ -63,6 +63,8 @@ func aiManifest() AIManifest {
 			{Name: "config_authoring", Description: "Expose the authoritative config schema and validate, write, or patch gitmake.json for agents without guessing fields.", Mutating: true},
 			{Name: "plan_apply", Description: "Create a reviewed immutable publish plan and apply it only if source/config/remote state still match.", Mutating: true},
 			{Name: "history", Description: "Read recent GitMake publish/apply audit records.", Mutating: false},
+			{Name: "mcp", Description: "Expose GitMake as a local MCP tool server. Read-only tools are the default; mutating tools require --allow-write.", Mutating: false},
+			{Name: "ai_setup", Description: "Automatically register GitMake MCP with Claude Code. Read-only access is the default; reviewed write tools require explicit setup.", Mutating: true},
 		},
 		Commands: map[string]AICommand{
 			"publish":         {Command: "gitmake --json", Description: "Publish/update according to gitmake.json.", Mutating: true},
@@ -79,6 +81,11 @@ func aiManifest() AIManifest {
 			"plan":            {Command: "gitmake plan --json", Description: "Create a stored reviewed plan with source/config hashes and remote baseline.", Mutating: false},
 			"apply":           {Command: "gitmake apply <plan_id> --json", Description: "Revalidate and execute exactly a previously reviewed plan.", Mutating: true},
 			"history":         {Command: "gitmake history --json", Description: "Read recent GitMake operation history.", Mutating: false},
+			"mcp":             {Command: "gitmake mcp", Description: "Run the local MCP stdio server. Add --allow-write only when config changes/apply are intentionally permitted.", Mutating: false},
+			"ai_setup":        {Command: "gitmake ai setup", Description: "Connect GitMake MCP to Claude Code at user scope with read-only tools by default.", Mutating: true},
+			"ai_setup_write":  {Command: "gitmake ai setup --write", Description: "Replace the Claude Code registration with reviewed GitMake write tools after explicit confirmation.", Mutating: true},
+			"ai_status":       {Command: "gitmake ai status --json", Description: "Inspect Claude Code detection, MCP registration, access level, and health.", Mutating: false},
+			"ai_remove":       {Command: "gitmake ai remove", Description: "Remove GitMake's user-scoped Claude Code MCP registration.", Mutating: true},
 		},
 		Safety:    AISafety{ForcePush: false, RewriteHistory: false, DeleteRepositories: false, ReadOnlyFlag: "--read-only", DryRunFlag: "--dry-run"},
 		ExitCodes: map[string]int{"success": 0, "runtime_error": 1, "usage_error": 2},
@@ -87,7 +94,10 @@ func aiManifest() AIManifest {
 			"Run `gitmake doctor --json` when environment health is uncertain.",
 			"Use `gitmake discover --json` when a folder contains multiple ZIPs and source selection is uncertain.",
 			"Before authoring gitmake.json, read `gitmake config schema --json`; never guess configuration fields.",
+			"When writing agent-authored config, prefer `gitmake config write --stdin --json` over editing gitmake.json directly, then validate it.",
 			"Validate agent-authored configuration with `gitmake config validate --json`.",
+			"If Claude Code is installed, `gitmake ai setup` can register GitMake MCP automatically; read-only access is the default.",
+			"When MCP is available, prefer GitMake MCP tools; enable reviewed write tools only through explicit `gitmake ai setup --write` or manual --allow-write server configuration.",
 			"Prefer `gitmake --dry-run --read-only --json` or `gitmake plan --json` before a mutating publish.",
 			"For explicit approval workflows, apply the reviewed plan with `gitmake apply <plan_id> --json` so changed inputs are rejected.",
 			"Do not replace GitMake with raw destructive git/gh operations unless the requested workflow is outside GitMake's scope.",
@@ -115,6 +125,8 @@ func runAIDescribe(o Options) error {
 	fmt.Println("  gitmake --dry-run --read-only --json")
 	fmt.Println("  gitmake plan --json            # optional approval checkpoint")
 	fmt.Println("  gitmake apply <plan_id> --json")
+	fmt.Println("  gitmake ai setup                # one-command Claude Code MCP registration")
+	fmt.Println("  gitmake mcp                     # raw read-only MCP server, for manual clients")
 	fmt.Println("\nSafety")
 	fmt.Println("  GitMake does not force-push, rewrite history, or delete repositories.")
 	return nil
@@ -182,13 +194,13 @@ Safe agent workflow:
 1. Discover capabilities with ` + "`gitmake ai describe --json`" + `.
 2. Check the environment with ` + "`gitmake doctor --json`" + ` when needed.
 3. If multiple ZIPs are present, inspect classification with ` + "`gitmake discover --json`" + `.
-4. Before creating or changing ` + "`gitmake.json`" + `, read ` + "`gitmake config schema --json`" + ` and validate the result with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
+4. Before creating or changing ` + "`gitmake.json`" + `, read ` + "`gitmake config schema --json`" + `. Prefer ` + "`gitmake config write --stdin --json`" + ` (or config patch) over direct file editing, then validate with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
 5. Preview changes with ` + "`gitmake --dry-run --read-only --json`" + `. GitMake may infer a missing config in memory without writing it.
 6. For approval-sensitive work, use ` + "`gitmake plan --json`" + ` and then ` + "`gitmake apply <plan_id> --json`" + ` after approval. The apply step rejects stale source/config/remote state.
 
 Do not use force-push, history rewriting, or repository deletion as a substitute for GitMake. If the requested GitHub workflow is outside GitMake's scope, explain that limitation or use an appropriate dedicated tool.
 
-Machine-readable capabilities are stored in ` + "`.gitmake/ai.json`" + `.
+Machine-readable capabilities are stored in ` + "`.gitmake/ai.json`" + `. For Claude Code, prefer ` + "`gitmake ai setup`" + ` to register the MCP server automatically. The default registration is read-only; reviewed config/apply tools require explicit ` + "`gitmake ai setup --write`" + `. For other MCP clients, ` + "`gitmake mcp`" + ` remains available directly.
 ` + agentsEnd + "\n"
 }
 

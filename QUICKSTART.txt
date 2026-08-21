@@ -1,35 +1,36 @@
-GitMake v0.5.2 - QUICK START
+GitMake v0.6.1 - QUICK START
 
-INSTALL
+INSTALL (recommended)
 1. Unzip the Windows x64 package.
 2. Double-click GitMake-Setup.exe.
-3. Open a new PowerShell window.
-4. Run: gitmake doctor
+3. If Claude Code is installed, Setup connects GitMake MCP automatically in read-only mode.
+4. Open a new PowerShell window.
+5. Run:
+     gitmake doctor
+     gitmake ai status
 
-FIRST PROJECT SETUP
-1. Put your project ZIP in a folder.
+ONE-COMMAND CLAUDE SETUP
+  gitmake ai setup
+
+Enable reviewed AI write tools only when you want them:
+  gitmake ai setup --write
+
+Check or remove the integration:
+  gitmake ai status
+  gitmake ai remove
+
+FIRST PROJECT
+1. Put the project ZIP in a folder.
 2. Open PowerShell in that folder.
 3. Run: gitmake init
-4. Accept/edit the suggested repository settings.
-5. Run: gitmake
+4. Run: gitmake
 
-FAST PATH
-With one ZIP and no config, plain `gitmake` can auto-create a private config and publish immediately.
-
-DAILY USE
-  gitmake
-
-AI / AGENT USE
+AI / AGENT FLOW
   gitmake ai describe --json
-  gitmake ai install
-  gitmake doctor --json
   gitmake --dry-run --read-only --json
-  gitmake --json
+  gitmake plan --json
+  gitmake apply <plan_id> --json   (after approval)
 
-USEFUL COMMANDS
-  gitmake init
-  gitmake init --yes
-  gitmake --dry-run
-  gitmake doctor
-  gitmake upgrade
-  gitmake --version
+RAW MCP (advanced / non-Claude clients)
+  gitmake mcp
+  gitmake mcp --allow-write
