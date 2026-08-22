@@ -46,7 +46,8 @@ type RepoConfig struct {
 }
 
 type SourceConfig struct {
-	ZIP       string `json:"zip"`
+	ZIP       string `json:"zip,omitempty"`
+	Folder    string `json:"folder,omitempty"`
 	StripRoot *bool  `json:"strip_root,omitempty"`
 }
 
@@ -148,7 +149,7 @@ func applyDefaults(c *Config) {
 	if c.Security.MaxGitFileBytes == 0 {
 		c.Security.MaxGitFileBytes = 95 * 1024 * 1024
 	}
-	if c.Source.StripRoot == nil {
+	if c.Source.ZIP != "" && c.Source.StripRoot == nil {
 		v := true
 		c.Source.StripRoot = &v
 	}
@@ -184,8 +185,13 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("repo.visibility must be private, public, or internal")
 	}
-	if c.Source.ZIP == "" {
-		return fmt.Errorf("source.zip is required")
+	zipSet := strings.TrimSpace(c.Source.ZIP) != ""
+	folderSet := strings.TrimSpace(c.Source.Folder) != ""
+	if zipSet == folderSet {
+		return fmt.Errorf("source must set exactly one of source.zip or source.folder")
+	}
+	if folderSet && c.Source.StripRoot != nil {
+		return fmt.Errorf("source.strip_root is only valid with source.zip")
 	}
 	if c.Git.Branch == "" || !branchRE.MatchString(c.Git.Branch) || strings.Contains(c.Git.Branch, "..") || strings.Contains(c.Git.Branch, "//") || strings.HasPrefix(c.Git.Branch, "/") || strings.HasSuffix(c.Git.Branch, "/") || strings.HasSuffix(c.Git.Branch, ".") {
 		return fmt.Errorf("git.branch is invalid: %q", c.Git.Branch)
@@ -488,6 +494,99 @@ func CreateForZIP(configPath, zipPath string, overwrite bool) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+// ConfigForFolder builds a validated default configuration for a source folder
+// without writing anything. The folder may be the project directory itself.
+func ConfigForFolder(configPath, folderPath string) (Config, error) {
+	absFolder, err := filepath.Abs(folderPath)
+	if err != nil {
+		return Config{}, err
+	}
+	info, err := os.Stat(absFolder)
+	if err != nil {
+		return Config{}, fmt.Errorf("source folder: %w", err)
+	}
+	if !info.IsDir() {
+		return Config{}, fmt.Errorf("source folder must be a directory: %s", absFolder)
+	}
+	base := filepath.Dir(configPath)
+	rel, err := filepath.Rel(base, absFolder)
+	if err != nil {
+		rel = absFolder
+	}
+	if rel == "." {
+		rel = "."
+	} else if strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		rel = absFolder
+	}
+	cfg := Config{
+		SchemaVersion: CurrentSchemaVersion,
+		Repo:          RepoConfig{Name: deriveRepoName(filepath.Base(absFolder)), Visibility: "private"},
+		Source:        SourceConfig{Folder: rel},
+		Git:           GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"},
+	}
+	applyDefaults(&cfg)
+	if err := cfg.Validate(); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// ConfigForSource accepts either a .zip file or a directory and creates the
+// corresponding source configuration in memory.
+func ConfigForSource(configPath, sourcePath string) (Config, error) {
+	abs, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return Config{}, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return Config{}, fmt.Errorf("source: %w", err)
+	}
+	if info.IsDir() {
+		return ConfigForFolder(configPath, abs)
+	}
+	return ConfigForZIP(configPath, abs)
+}
+
+// CreateForSource persists a source config for either a ZIP or a folder.
+func CreateForSource(configPath, sourcePath string, overwrite bool) (Config, error) {
+	if !overwrite {
+		if _, err := os.Stat(configPath); err == nil {
+			return Config{}, fmt.Errorf("configuration already exists: %s", configPath)
+		} else if !os.IsNotExist(err) {
+			return Config{}, err
+		}
+	}
+	cfg, err := ConfigForSource(configPath, sourcePath)
+	if err != nil {
+		return Config{}, err
+	}
+	if err := Save(configPath, cfg); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
+}
+
+func ResolveProjectFolder(configPath string, c Config) (string, error) {
+	base := filepath.Dir(configPath)
+	candidate := c.Source.Folder
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(base, candidate)
+	}
+	candidate = filepath.Clean(candidate)
+	info, err := os.Stat(candidate)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("configured source folder %q was not found", c.Source.Folder)
+		}
+		return "", fmt.Errorf("source folder: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("source.folder does not point to a directory: %s", candidate)
+	}
+	return candidate, nil
 }
 
 // ResolveProjectZIPReadOnly resolves source.zip without repairing or rewriting

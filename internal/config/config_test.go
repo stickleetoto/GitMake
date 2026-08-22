@@ -242,3 +242,34 @@ func TestResolveProjectZIPRefusesRetargetOfRealRepoConfig(t *testing.T) {
 		t.Fatalf("repaired=%v err=%v", repaired, err)
 	}
 }
+
+func TestFolderSourceConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := ConfigForFolder(filepath.Join(dir, "gitmake.json"), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Source.Folder != "." || cfg.Source.ZIP != "" || cfg.Source.StripRoot != nil {
+		t.Fatalf("unexpected folder source: %+v", cfg.Source)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSourceRequiresExactlyOneMode(t *testing.T) {
+	base := Config{SchemaVersion: 1, Repo: RepoConfig{Name: "Demo", Visibility: "private"}, Git: GitConfig{Branch: "main", InitialCommitMessage: "Initial commit", CommitMessage: "Update repository"}}
+	base.Source = SourceConfig{}
+	if err := base.Validate(); err == nil {
+		t.Fatal("expected missing source error")
+	}
+	strip := true
+	base.Source = SourceConfig{ZIP: "a.zip", Folder: ".", StripRoot: &strip}
+	if err := base.Validate(); err == nil {
+		t.Fatal("expected dual source error")
+	}
+	base.Source = SourceConfig{Folder: ".", StripRoot: &strip}
+	if err := base.Validate(); err == nil {
+		t.Fatal("expected folder strip_root error")
+	}
+}

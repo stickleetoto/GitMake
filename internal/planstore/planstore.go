@@ -53,6 +53,7 @@ type Plan struct {
 	ConfigPath       string          `json:"config_path,omitempty"`
 	ConfigPersisted  bool            `json:"config_persisted"`
 	ConfigSHA256     string          `json:"config_sha256,omitempty"`
+	SourceMode       string          `json:"source_mode,omitempty"`
 	SourcePath       string          `json:"source_path"`
 	SourceSHA256     string          `json:"source_sha256"`
 	Repository       string          `json:"repository"`

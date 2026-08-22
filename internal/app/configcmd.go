@@ -81,7 +81,11 @@ func runConfigValidate(o Options) error {
 	fmt.Printf("GitMake Config · %s\n\n", Version)
 	fmt.Println("✓ Valid", path)
 	fmt.Printf("  Repository  %s · %s\n", cfg.Repo.Name, cfg.Repo.Visibility)
-	fmt.Printf("  Source      %s\n", cfg.Source.ZIP)
+	if cfg.Source.Folder != "" {
+		fmt.Printf("  Source      folder · %s\n", cfg.Source.Folder)
+	} else {
+		fmt.Printf("  Source      zip · %s\n", cfg.Source.ZIP)
+	}
 	fmt.Printf("  Branch      %s\n", cfg.Git.Branch)
 	if cfg.Release.Enabled {
 		fmt.Printf("  Release     %s · %d assets\n", cfg.Release.Tag, len(cfg.Release.Assets))

@@ -18,8 +18,10 @@ type PipelineState struct {
 	RemoteVisibility string          `json:"remote_visibility,omitempty"`
 	Branch           string          `json:"branch,omitempty"`
 	Source           string          `json:"source,omitempty"`
+	SourceMode       string          `json:"source_mode,omitempty"`
 	SourcePath       string          `json:"source_path,omitempty"`
 	SourceSHA256     string          `json:"source_sha256,omitempty"`
+	IgnoredFiles     int             `json:"ignored_files,omitempty"`
 	BaseCommit       string          `json:"base_commit,omitempty"`
 	PlanID           string          `json:"plan_id,omitempty"`
 	Files            int             `json:"files,omitempty"`

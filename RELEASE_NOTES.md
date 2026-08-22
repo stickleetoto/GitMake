@@ -1,62 +1,69 @@
-# GitMake v0.7.3 — High-level MCP Prepare
+# GitMake v0.8.0 — Folder or ZIP, Same Safe Workflow
 
-v0.7.3 closes the remaining MCP-only workflow gap found in real Claude Code testing. Claude could discover the ZIP, infer a config, validate it, and create a safe plan through GitMake — but it still used its host `Write(gitmake.json)` tool between those steps.
+v0.8.0 adds direct **project folder publishing** without removing or weakening GitMake's established ZIP workflow.
 
-GitMake now exposes one high-level MCP tool: **`gitmake_prepare`**.
+## Two first-class source modes
 
-## One call from ZIP to reviewed plan
-
-For a folder containing only a project ZIP, an agent can call:
+ZIP mode remains unchanged:
 
 ```text
-gitmake_prepare
+gitmake Project.zip
 ```
 
-GitMake then performs the full preparation pipeline itself:
+Folder mode can now publish a live source tree:
 
 ```text
-discover source ZIP
-→ infer validated config
-→ security scan / large-file / LFS checks
-→ Git + GitHub preflight
-→ repository existence / visibility check
-→ project identity validation
-→ managed-sync change calculation
-→ destructive-risk classification
-→ immutable reviewed plan
-→ stop before apply
+cd MyProject
+gitmake .
 ```
 
-The structured response uses `gitmake.prepare/v1` and includes the reviewed plan, config state, MCP access state, and the next required human-approval action.
+A normal project directory can also be inferred by `gitmake` / `gitmake_prepare` when strong project markers are present.
 
-## Read-only stays genuinely read-only
+## Folder snapshots, not direct working-tree commits
 
-The default `gitmake ai setup` registration remains read-only. If no `gitmake.json` exists, `gitmake_prepare` infers and validates the config **in memory** and still creates the reviewed plan. It does not write the project and does not mutate GitHub.
+GitMake does not commit the live folder directly. It builds a deterministic temporary snapshot, then runs the same security, identity, managed-sync, planning, approval, and apply pipeline already used for ZIP sources.
 
-This means an AI no longer needs to escape to its own filesystem Write/Edit tool just to reach the plan stage.
+Folder mode:
 
-## Write-enabled mode uses GitMake's writer
+- honors common root/nested `.gitignore` rules;
+- supports a root `.gitmakeignore` for publish-only exclusions;
+- always excludes `.git/`, `.gitmake/`, `gitmake.json`, `.env`, common dependency/cache directories, and platform junk;
+- rejects symlinks, special files, unsafe relative paths, and case-colliding paths;
+- hashes only the selected publishable snapshot, so ignored-file changes do not stale a reviewed plan;
+- invalidates a reviewed plan when an included source file changes.
 
-If the user explicitly enabled:
+## Config schema
 
-```text
-gitmake ai setup --write
+`source` now accepts exactly one mode:
+
+```json
+{"source":{"folder":"."}}
 ```
 
-then `gitmake_prepare` may persist a missing config. The write is routed through GitMake's existing strict schema validation and atomic replacement path. The high-level tool still does **not** publish or apply the plan.
+or:
 
-## Agent guidance hardened
+```json
+{"source":{"zip":"Project.zip","strip_root":true}}
+```
 
-`gitmake ai describe --json` and the MCP tool description now explicitly tell agents:
+Existing ZIP configs remain compatible with schema version 1.
 
-- prefer `gitmake_prepare` for ZIP-only/unconfigured projects;
-- do not create or edit `gitmake.json` with host filesystem Write/Edit tools when GitMake authoring tools are available;
-- surface plan provenance, changes, and risk to the user;
-- wait for explicit approval;
-- MCP apply still requires a human-minted one-shot approval token.
+## MCP / LLM workflow
 
-## Safety inherited from v0.7.2
+`gitmake_prepare` is now the primary high-level entry point for **both folders and ZIPs**. It infers the source mode, creates a safe snapshot, validates or authors config through GitMake, runs preflight checks, and returns the immutable reviewed plan before any GitHub mutation.
 
-The high-level tool does not bypass any safety gates. Project identity binding, stale-source retarget refusal, managed-sync preservation, secret scanning, large-file/LFS checks, branch/tag preflight, stale-plan rejection, destructive deletion gates, and one-shot approval remain enforced by the same underlying GitMake pipeline.
+Plans now explicitly carry `source_mode` (`folder` or `zip`) alongside `source_path` and the deterministic source SHA-256.
 
-No force push, history rewrite, repository deletion, or unreviewed MCP publish capability was added.
+## Regression coverage
+
+v0.8.0 adds E2E coverage for:
+
+- direct folder publishing;
+- `.gitignore` / `.gitmakeignore` and hard default exclusions;
+- exclusion of `gitmake.json` and local secret/cache files from the repository;
+- folder-mode plan provenance;
+- ignored-file changes remaining plan-safe;
+- included-file changes making a plan stale;
+- MCP `gitmake_prepare` inferring a folder source with no ZIP and no config.
+
+All prior ZIP, MCP, safety-gate, project-identity, destructive-approval, AI setup, and release regression suites were rerun after the change.

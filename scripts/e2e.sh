@@ -154,7 +154,7 @@ grep -q 'already up to date' "$A/nochange.log"
 # D. No ZIP is onboarding, not a crash/error exit.
 D="$TMP/nozip"; mkdir -p "$D"
 (cd "$D" && "$BIN" >nozip.log 2>&1)
-grep -q 'No project ZIP found in this folder' "$D/nozip.log"
+grep -q 'No project source could be selected in this folder' "$D/nozip.log"
 
 # E. Placeholder starter repairs itself when one ZIP is added later.
 makezip "$D/Recover_v2.0.zip" 'Recover/file.txt=ok'

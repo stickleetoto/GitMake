@@ -1,8 +1,8 @@
-GitMake v0.7.3 - QUICK START
+GitMake v0.8.0 - QUICK START
 ============================
 
 WINDOWS
-1. Extract GitMake_v0.7.3_Windows_x64.zip.
+1. Extract GitMake_v0.8.0_Windows_x64.zip.
 2. Double-click GitMake-Setup.exe.
 3. Open a new PowerShell window.
 4. Run: gitmake doctor
@@ -14,12 +14,20 @@ LINUX / macOS
 3. Open a new shell if PATH was updated.
 4. Run: gitmake doctor
 
-PROJECT
-1. Put the project source ZIP in a folder.
-2. Run: gitmake init
-3. Review gitmake.json.
-4. Preview safely: gitmake --dry-run --read-only --json
-5. Publish: gitmake
+PROJECT — FOLDER MODE
+1. Open a terminal in the live project folder.
+2. Run: gitmake .
+   (GitMake can also auto-detect a normal project folder with just: gitmake)
+3. Folder mode honors common .gitignore rules + optional .gitmakeignore.
+
+PROJECT — ZIP MODE
+1. Put the project source ZIP in a staging folder.
+2. Run: gitmake Project.zip
+
+REVIEW FIRST
+1. gitmake --dry-run --read-only --json
+2. gitmake plan --json
+3. Review source_mode/source_path/changes/risk before apply.
 
 SAFER AI FLOW
 1. gitmake plan --json

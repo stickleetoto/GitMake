@@ -1,18 +1,17 @@
 {
   "schema_version": 1,
   "repo": {
-    "name": "GitMake-Demo",
-    "description": "Example repository published by GitMake",
+    "name": "GitMake-Folder-Demo",
+    "description": "Example folder-mode repository published by GitMake",
     "visibility": "private"
   },
   "source": {
-    "zip": "GitMake-Demo.zip",
-    "strip_root": true
+    "folder": "."
   },
   "git": {
     "branch": "main",
     "initial_commit_message": "Initial commit",
-    "commit_message": "Update GitMake-Demo"
+    "commit_message": "Update GitMake-Folder-Demo"
   },
   "sync": {
     "mode": "managed",

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"gitmake/internal/archive"
 	"gitmake/internal/config"
 	"gitmake/internal/discovery"
 	"gitmake/internal/github"
@@ -23,7 +22,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.7.3"
+const Version = "0.8.0"
 
 type Options struct {
 	Command       string
@@ -235,7 +234,7 @@ func parseArgs(args []string) (Options, error) {
 	switch o.Command {
 	case "publish", "plan":
 		if len(rest) > 1 {
-			return Options{}, fmt.Errorf("expected at most one ZIP path, got: %s", strings.Join(rest, " "))
+			return Options{}, fmt.Errorf("expected at most one source path, got: %s", strings.Join(rest, " "))
 		}
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
@@ -247,7 +246,7 @@ func parseArgs(args []string) (Options, error) {
 		o.PlanID = rest[0]
 	case "init":
 		if len(rest) > 1 {
-			return Options{}, fmt.Errorf("usage: gitmake init [project.zip]")
+			return Options{}, fmt.Errorf("usage: gitmake init [project-folder|project.zip]")
 		}
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
@@ -356,11 +355,12 @@ func printHelp() {
 
 Usage:
   gitmake                     Publish/update the project in this folder
-  gitmake Project.zip         Use a specific source ZIP
-  gitmake init [Project.zip]  Create gitmake.json
+  gitmake .                   Publish the current project folder explicitly
+  gitmake Project.zip         Publish a specific ZIP snapshot
+  gitmake init [source]       Create gitmake.json for a folder or ZIP
   gitmake doctor              Check Git, GitHub CLI, login, identity, and PATH
   gitmake discover            Classify project/release ZIPs without changing files
-  gitmake plan [Project.zip]  Create an immutable reviewed publish plan
+  gitmake plan [source]       Create an immutable reviewed publish plan
   gitmake apply <plan_id>     Revalidate and apply a previously reviewed plan
   gitmake approve <plan_id>   Create a one-shot MCP approval token
   gitmake inspect             Inspect project/config/security state without mutation
@@ -397,6 +397,7 @@ Safety:
   Secret/large-file/LFS/branch/tag preflight runs before mutation.
   MCP apply requires a one-shot human approval token.
   Destructive plans require a separate explicit --destructive human approval.
+  Folder mode honors common .gitignore rules + .gitmakeignore and excludes local Git/cache metadata.
   Existing repository configs are never auto-retargeted to a different lone ZIP.
 `, Version)
 }
@@ -417,48 +418,51 @@ func runInit(o Options) error {
 		return fmt.Errorf("check config: %w", err)
 	}
 
-	var zipPath string
+	var sel sourceSelection
 	if o.SourceArg != "" {
-		zipPath = o.SourceArg
-		if !filepath.IsAbs(zipPath) {
-			zipPath = filepath.Join(cwd, zipPath)
-		}
+		sel, err = explicitSource(cwd, o.SourceArg)
 	} else {
-		zips, err := config.DiscoverZIPs(cwd)
+		sel, err = inferSource(cwd)
 		if err != nil {
-			return err
-		}
-		switch len(zips) {
-		case 0:
-			fmt.Printf("GitMake setup · %s\n\n", Version)
-			fmt.Println("No project ZIP found in this folder.")
-			fmt.Println("\nPut a .zip file here, then run:")
-			fmt.Println("  gitmake init")
-			fmt.Println("\nOr choose one directly:")
-			fmt.Println("  gitmake init path\\to\\Project.zip")
-			return nil
-		case 1:
-			zipPath = filepath.Join(cwd, zips[0])
-		default:
-			if o.Yes {
-				return multipleZIPError(zips)
+			zips, zipErr := config.DiscoverZIPs(cwd)
+			if zipErr != nil {
+				return zipErr
 			}
-			fmt.Printf("GitMake setup · %s\n\n", Version)
-			p := newInitPrompter()
-			selected, err := p.chooseZIP(zips)
-			if err != nil {
-				return err
+			if len(zips) > 1 {
+				if o.Yes {
+					return multipleZIPError(zips)
+				}
+				fmt.Printf("GitMake setup · %s\n\n", Version)
+				p := newInitPrompter()
+				selected, chooseErr := p.chooseZIP(zips)
+				if chooseErr != nil {
+					return chooseErr
+				}
+				sel, err = explicitSource(cwd, selected)
+				fmt.Println()
 			}
-			zipPath = filepath.Join(cwd, selected)
-			fmt.Println()
 		}
 	}
-
-	cfg, err := config.ConfigForZIP(configPath, zipPath)
+	if err != nil {
+		fmt.Printf("GitMake setup · %s\n\n", Version)
+		fmt.Println("No unambiguous project source found.")
+		fmt.Println("\nRun inside the project folder:")
+		fmt.Println("  gitmake init .")
+		fmt.Println("\nOr choose a ZIP directly:")
+		fmt.Println("  gitmake init path\\to\\Project.zip")
+		return nil
+	}
+	cfg, err := configForSelection(configPath, sel)
 	if err != nil {
 		return err
 	}
-	return runInitWizard(cfg, configPath, filepath.Base(zipPath), o.Yes)
+	label := sourceDisplay(sel)
+	if sel.Mode == "folder" {
+		label = "folder · " + sel.Path
+	} else {
+		label = "zip · " + filepath.Base(sel.Path)
+	}
+	return runInitWizard(cfg, configPath, label, o.Yes)
 }
 
 func runInstall() error {
@@ -707,27 +711,15 @@ func runPublish(o Options) error {
 	}
 	configPath := resolveConfigPath(cwd, o.ConfigPath)
 
-	// A positional ZIP is the strongest source-selection signal. It never
-	// requires archive classification and, in read-only mode, never causes a
-	// config file to be written.
-	var explicitZip string
-	if o.SourceArg != "" {
-		explicitZip = o.SourceArg
-		if !filepath.IsAbs(explicitZip) {
-			explicitZip = filepath.Join(cwd, explicitZip)
-		}
-		info, statErr := os.Stat(explicitZip)
-		if statErr != nil {
-			return fmt.Errorf("source ZIP: %w", statErr)
-		}
-		if !info.Mode().IsRegular() || !strings.EqualFold(filepath.Ext(explicitZip), ".zip") {
-			return fmt.Errorf("source must be a regular .zip file: %s", explicitZip)
-		}
+	// A positional path is the strongest source-selection signal. v0.8 accepts
+	// either a project folder or a ZIP snapshot.
+	explicit, err := explicitSource(cwd, o.SourceArg)
+	if err != nil {
+		return err
 	}
 
 	var cfg config.Config
-	var zipPath string
-	repaired := false
+	var source sourceSelection
 	configPersisted := false
 	configSource := "file"
 	configExists := false
@@ -743,67 +735,60 @@ func runPublish(o Options) error {
 			return err
 		}
 		configPersisted = true
-		zipPath = explicitZip
-		if zipPath == "" {
-			if o.ReadOnly {
-				zipPath, err = config.ResolveProjectZIPReadOnly(configPath, cfg)
-			} else {
-				zipPath, repaired, err = config.ResolveProjectZIP(configPath, &cfg)
-			}
+		source = explicit
+		if source.Path == "" {
+			source, err = configuredSource(configPath, &cfg, o.ReadOnly)
 			if err != nil {
 				return err
 			}
 		}
 	} else {
 		configSource = "inferred"
-		zipPath = explicitZip
-		if zipPath == "" {
-			report, discoverErr := discovery.Analyze(cwd)
-			if discoverErr != nil {
-				return discoverErr
+		source = explicit
+		if source.Path == "" {
+			source, err = inferSource(cwd)
+			if source.Discovery != nil && o.State != nil {
+				o.State.Discovery = discoveryStateFromReport(*source.Discovery)
 			}
-			if o.State != nil {
-				o.State.Discovery = discoveryStateFromReport(report)
-			}
-			if report.SelectedSource == "" {
-				if len(report.Archives) == 0 {
-					if o.ReadOnly || o.JSON {
-						return config.ErrNoProjectZIP
-					}
-					fmt.Printf("GitMake %s\n\n", Version)
-					fmt.Println("No project ZIP found in this folder.")
-					fmt.Println("\nPut one .zip file here and run `gitmake`, or use:\n  gitmake path\\to\\Project.zip")
-					return nil
+			if err != nil {
+				// Ambiguous or suspicious ZIP selections are safety decisions, not
+				// onboarding. Never turn them into a successful no-op: require the
+				// caller to choose an explicit source.
+				if source.Discovery != nil && source.Discovery.NeedsInput {
+					return err
 				}
-				if report.NeedsInput {
-					return errors.New("multiple source candidates found; run `gitmake discover --json` or choose one explicitly with `gitmake Project.zip`")
+				if o.ReadOnly || o.JSON {
+					return err
 				}
-				return errors.New("no usable project ZIP could be selected; run `gitmake discover --json` for details")
+				fmt.Printf("GitMake %s\n\n", Version)
+				fmt.Println("No project source could be selected in this folder.")
+				fmt.Println("\nRun GitMake inside a project folder, or provide a source directly:")
+				fmt.Println("  gitmake .")
+				fmt.Println("  gitmake path\\to\\Project.zip")
+				return nil
 			}
-			zipPath = filepath.Join(cwd, report.SelectedSource)
 		}
 
-		// Build the same validated defaults as `gitmake init`, but keep them in
-		// memory for read-only previews. A mutating run persists them once.
-		cfg, err = config.ConfigForZIP(configPath, zipPath)
+		cfg, err = configForSelection(configPath, source)
 		if err != nil {
 			return err
 		}
 		if !o.ReadOnly {
-			cfg, err = config.CreateForZIP(configPath, zipPath, false)
+			cfg, err = createConfigForSelection(configPath, source)
 			if err != nil {
 				return err
 			}
 			configPersisted = true
 		}
 	}
-	zipPath, err = filepath.Abs(zipPath)
+
+	source.Path, err = filepath.Abs(source.Path)
 	if err != nil {
-		return fmt.Errorf("resolve source ZIP path: %w", err)
+		return fmt.Errorf("resolve source path: %w", err)
 	}
-	sourceSHA, err := sha256File(zipPath)
+	sourceSHA, err := hashSelectedSource(source)
 	if err != nil {
-		return fmt.Errorf("hash source ZIP: %w", err)
+		return fmt.Errorf("hash source %s: %w", source.Mode, err)
 	}
 	configSHA := ""
 	if configPersisted {
@@ -813,8 +798,9 @@ func runPublish(o Options) error {
 		}
 	}
 	if o.State != nil {
-		o.State.Source = filepath.Base(zipPath)
-		o.State.SourcePath = zipPath
+		o.State.SourceMode = source.Mode
+		o.State.Source = sourceDisplay(source)
+		o.State.SourcePath = source.Path
 		o.State.SourceSHA256 = sourceSHA
 		o.State.Visibility = cfg.Repo.Visibility
 		configState := &ConfigState{Source: configSource, Persisted: configPersisted, SHA256: configSHA}
@@ -881,16 +867,18 @@ func runPublish(o Options) error {
 	if exists && strings.TrimSpace(repoInfo.Visibility) != "" && !strings.EqualFold(repoInfo.Visibility, cfg.Repo.Visibility) {
 		fmt.Printf("! Visibility mismatch   config %s · remote %s (remote unchanged)\n", cfg.Repo.Visibility, strings.ToLower(repoInfo.Visibility))
 	}
-	if repaired {
-		fmt.Printf("✓ Source selected       %s\n", filepath.Base(zipPath))
+	if source.Repaired {
+		fmt.Printf("✓ Source selected       %s\n", sourceDisplay(source))
 	}
 	if configSource == "inferred" {
 		if o.ReadOnly {
-			fmt.Printf("· Config inferred       memory only · %s\n", filepath.Base(zipPath))
+			fmt.Printf("· Config inferred       memory only · %s mode\n", source.Mode)
 		} else {
 			fmt.Printf("✓ Config created        %s\n", configPath)
 		}
 	}
+	fmt.Printf("· Source mode           %s\n", source.Mode)
+	fmt.Printf("· Source path           %s\n", source.Path)
 
 	if o.State != nil {
 		o.State.enter("PREPARE")
@@ -905,15 +893,19 @@ func runPublish(o Options) error {
 		defer os.RemoveAll(work)
 	}
 	snapshot := filepath.Join(work, "snapshot")
-	files, err := archive.ExtractSafe(zipPath, snapshot, *cfg.Source.StripRoot)
+	files, ignored, snapshotHash, err := snapshotSelectedSource(source, cfg, snapshot)
 	if err != nil {
 		return err
 	}
 	if files == 0 {
-		return fmt.Errorf("source ZIP contains no regular files")
+		return fmt.Errorf("source %s contains no publishable regular files", source.Mode)
+	}
+	if snapshotHash != sourceSHA {
+		return fmt.Errorf("source changed while preparing the snapshot; create a fresh plan")
 	}
 	if o.State != nil {
 		o.State.Files = files
+		o.State.IgnoredFiles = ignored
 		o.State.enter("SECURITY")
 	}
 	securityReport, err := enforceSecurity(snapshot, cfg, git.HasLFS())
@@ -927,6 +919,9 @@ func runPublish(o Options) error {
 		o.State.enter("VALIDATE")
 	}
 	fmt.Printf("✓ Source validated      %d files\n", files)
+	if source.Mode == "folder" && ignored > 0 {
+		fmt.Printf("· Ignored entries       %d · .gitignore/.gitmakeignore/defaults\n", ignored)
+	}
 	if securityReport.SecretScan {
 		fmt.Printf("✓ Security scan         %d files · no secrets\n", securityReport.ScannedFiles)
 	}

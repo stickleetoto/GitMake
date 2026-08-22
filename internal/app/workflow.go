@@ -58,6 +58,7 @@ func runPlan(o Options) error {
 	} else {
 		fmt.Println("· Config               inferred in memory")
 	}
+	fmt.Printf("· Source mode          %s\n", firstNonEmpty(p.SourceMode, "zip"))
 	fmt.Printf("· Source               %s\n", p.SourcePath)
 	fmt.Printf("✓ Repository           %s · %s\n", p.Repository, p.Mode)
 	if p.RemoteVisibility != "" {
@@ -122,12 +123,20 @@ func runApply(o Options) error {
 		return fmt.Errorf("plan is stale: it was created for %s, current directory is %s", plannedWD, cwd)
 	}
 
-	sourceSHA, err := sha256File(p.SourcePath)
+	mode := p.SourceMode
+	if mode == "" {
+		if st, statErr := os.Stat(p.SourcePath); statErr == nil && st.IsDir() {
+			mode = "folder"
+		} else {
+			mode = "zip"
+		}
+	}
+	sourceSHA, err := hashSelectedSource(sourceSelection{Mode: mode, Path: p.SourcePath})
 	if err != nil {
-		return fmt.Errorf("plan is stale: source ZIP is unavailable: %w", err)
+		return fmt.Errorf("plan is stale: source %s is unavailable: %w", mode, err)
 	}
 	if !strings.EqualFold(sourceSHA, p.SourceSHA256) {
-		return fmt.Errorf("plan is stale: source ZIP changed after review")
+		return fmt.Errorf("plan is stale: source %s changed after review", mode)
 	}
 	if p.ConfigPersisted {
 		configSHA, err := sha256File(p.ConfigPath)

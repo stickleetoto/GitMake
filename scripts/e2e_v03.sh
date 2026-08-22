@@ -62,7 +62,7 @@ PY
 }
 
 # no ZIP: onboarding and no placeholder mutation
-P="$TMP/nozip"; mkdir -p "$P"; (cd "$P" && "$BIN" >o 2>&1); grep -q 'No project ZIP found' "$P/o"; test ! -e "$P/gitmake.json"
+P="$TMP/nozip"; mkdir -p "$P"; (cd "$P" && "$BIN" >o 2>&1); grep -q 'No project source could be selected' "$P/o"; test ! -e "$P/gitmake.json"
 
 # one ZIP: config + CREATE in one run
 P="$TMP/demo"; mkdir -p "$P"; makezip "$P/Demo_v1.0.0.zip" 'Demo/a.txt=a'; (cd "$P" && "$BIN" >o 2>&1); grep -q 'Repository created' "$P/o"; test -f "$P/gitmake.json"; test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 1

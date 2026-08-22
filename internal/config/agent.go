@@ -70,10 +70,15 @@ func SchemaDocument() map[string]any {
 				},
 			},
 			"source": map[string]any{
-				"type": "object", "additionalProperties": false, "required": []string{"zip"},
+				"type": "object", "additionalProperties": false,
 				"properties": map[string]any{
-					"zip":        map[string]any{"type": "string", "minLength": 1},
-					"strip_root": map[string]any{"type": "boolean", "default": true},
+					"zip":        map[string]any{"type": "string", "minLength": 1, "description": "ZIP snapshot source."},
+					"folder":     map[string]any{"type": "string", "minLength": 1, "description": "Folder source. Use '.' for the project directory."},
+					"strip_root": map[string]any{"type": "boolean", "default": true, "description": "ZIP-only: strip one common top-level directory."},
+				},
+				"oneOf": []any{
+					map[string]any{"required": []string{"zip"}, "not": map[string]any{"required": []string{"folder"}}},
+					map[string]any{"required": []string{"folder"}, "not": map[string]any{"anyOf": []any{map[string]any{"required": []string{"zip"}}, map[string]any{"required": []string{"strip_root"}}}}},
 				},
 			},
 			"git": map[string]any{

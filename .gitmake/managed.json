@@ -15,6 +15,7 @@
     "build.ps1",
     "cmd/gitmake/main.go",
     "cmd/setup/main.go",
+    "examples/gitmake.folder.json",
     "examples/gitmake.json",
     "go.mod",
     "internal/aiconnect/claude.go",
@@ -34,6 +35,7 @@
     "internal/app/risk.go",
     "internal/app/risk_test.go",
     "internal/app/safety.go",
+    "internal/app/source.go",
     "internal/app/workflow.go",
     "internal/approval/approval.go",
     "internal/approval/approval_test.go",
@@ -47,6 +49,8 @@
     "internal/consoleui/pause_windows.go",
     "internal/discovery/discovery.go",
     "internal/discovery/discovery_test.go",
+    "internal/foldersource/folder.go",
+    "internal/foldersource/folder_test.go",
     "internal/github/github.go",
     "internal/gitops/git.go",
     "internal/gitops/git_test.go",
@@ -78,6 +82,7 @@
     "scripts/e2e_v061.sh",
     "scripts/e2e_v07.sh",
     "scripts/e2e_v072.sh",
-    "scripts/e2e_v073.sh"
+    "scripts/e2e_v073.sh",
+    "scripts/e2e_v080.sh"
   ]
 }

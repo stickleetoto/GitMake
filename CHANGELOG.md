@@ -1,3 +1,16 @@
+## v0.8.0 — Folder or ZIP, Same Safe Workflow
+
+- Added first-class `source.folder` alongside the existing `source.zip` mode; exactly one source mode is required.
+- Added direct folder publishing with `gitmake .` and project-folder inference for normal source trees.
+- Folder mode builds a deterministic temporary snapshot and reuses the same GitMake security/identity/managed-sync/plan/apply pipeline instead of committing the live working tree.
+- Added root/nested `.gitignore` support plus root `.gitmakeignore` for publish-only exclusions.
+- Hard-excluded `.git/`, `.gitmake/`, `gitmake.json`, `.env`, common dependency/cache directories, and platform junk from folder snapshots.
+- Added folder-source safety checks for symlinks, unsupported entries, unsafe paths, and case-colliding paths.
+- Added deterministic folder hashing: ignored-file changes do not stale a plan, included-file changes do.
+- Plans and machine output now expose `source_mode` together with `source_path` and source hash.
+- Expanded `gitmake_prepare` MCP to prefer one high-level folder-or-ZIP preparation workflow.
+- Added v0.8 folder E2E coverage and reran all prior regression suites.
+
 ## v0.7.3 — High-level MCP Prepare
 
 - Added `gitmake_prepare`, a high-level MCP tool that turns a ZIP-only project into a reviewed GitMake plan in one call.

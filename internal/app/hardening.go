@@ -39,7 +39,7 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 	case strings.Contains(lower, "potential secrets detected"):
 		out.Code = "SECRET_DETECTED"
 		out.Recoverable = true
-		out.SuggestedAction = "Remove the secret from the source ZIP or explicitly allow a safe fixture path in security.allow_secret_paths."
+		out.SuggestedAction = "Remove the secret from the selected source or explicitly allow a safe fixture path in security.allow_secret_paths."
 	case strings.Contains(lower, "large file") && strings.Contains(lower, "safe direct-git threshold"):
 		out.Code = "LARGE_FILE_BLOCKED"
 		out.Recoverable = true
@@ -71,7 +71,7 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 	case strings.Contains(lower, "refusing to retarget repository"):
 		out.Code = "PROJECT_SOURCE_MISMATCH"
 		out.Recoverable = true
-		out.SuggestedAction = "Verify the project directory and update source.zip explicitly; GitMake will not retarget an existing repository config to a different lone ZIP."
+		out.SuggestedAction = "Verify the project directory and configured source. GitMake will not silently retarget an existing ZIP repository config to a different archive."
 	case strings.Contains(lower, "approval token") || strings.Contains(lower, "one-shot approval"):
 		out.Code = "APPROVAL_REQUIRED"
 		out.Recoverable = true
@@ -83,7 +83,7 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 	case strings.Contains(lower, "no project zip") || strings.Contains(lower, "source zip") && strings.Contains(lower, "not found"):
 		out.Code = "SOURCE_NOT_FOUND"
 		out.Recoverable = true
-		out.SuggestedAction = "Place a project ZIP in the folder or pass it explicitly."
+		out.SuggestedAction = "Run GitMake inside a project folder, pass `.` explicitly, or provide a project ZIP."
 	case strings.Contains(lower, "github authentication") || strings.Contains(lower, "gh auth login"):
 		out.Code = "GH_AUTH_REQUIRED"
 		out.Recoverable = true
@@ -130,6 +130,7 @@ func fingerprintState(s *PipelineState) (string, error) {
 		RemoteVisibility string         `json:"remote_visibility"`
 		Mode             string         `json:"mode"`
 		Branch           string         `json:"branch"`
+		SourceMode       string         `json:"source_mode"`
 		SourceSHA256     string         `json:"source_sha256"`
 		BaseCommit       string         `json:"base_commit"`
 		Changes          *ChangeCounts  `json:"changes"`
@@ -139,7 +140,7 @@ func fingerprintState(s *PipelineState) (string, error) {
 		ConfigSHA256     string         `json:"config_sha256"`
 	}{
 		Repository: s.Repository, Visibility: s.Visibility, RemoteVisibility: s.RemoteVisibility, Mode: s.Mode, Branch: s.Branch,
-		SourceSHA256: s.SourceSHA256, BaseCommit: s.BaseCommit, Changes: s.Changes, Release: s.Release, Identity: s.Identity, Risk: s.Risk,
+		SourceMode: s.SourceMode, SourceSHA256: s.SourceSHA256, BaseCommit: s.BaseCommit, Changes: s.Changes, Release: s.Release, Identity: s.Identity, Risk: s.Risk,
 	}
 	if s.Config != nil {
 		payload.ConfigSHA256 = s.Config.SHA256
@@ -162,7 +163,7 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 	}
 	p := planstore.Plan{
 		Schema: planstore.Schema, ID: id, WorkingDirectory: cwd,
-		SourcePath: s.SourcePath, SourceSHA256: s.SourceSHA256,
+		SourceMode: s.SourceMode, SourcePath: s.SourcePath, SourceSHA256: s.SourceSHA256,
 		Repository: s.Repository, Visibility: s.Visibility, RemoteVisibility: s.RemoteVisibility, Mode: s.Mode, Branch: s.Branch,
 		BaseCommit:  s.BaseCommit,
 		Changes:     planstore.ChangeCounts{Added: s.Changes.Added, Modified: s.Changes.Modified, Deleted: s.Changes.Deleted},
@@ -180,7 +181,7 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 		p.Risk = planstore.Risk{Level: s.Risk.Level, Destructive: s.Risk.Destructive, DeletionRatio: s.Risk.DeletionRatio, Deleted: s.Risk.Deleted, ManagedBaseline: s.Risk.ManagedBaseline, Reasons: append([]string(nil), s.Risk.Reasons...)}
 	}
 	p.ReviewNotes = []string{
-		"Verify working_directory, config_path, source_path, and repository before approval.",
+		"Verify working_directory, config_path, source_mode, source_path, and repository before approval.",
 		"A destructive plan requires a separate --destructive human approval and cannot use a normal approval token.",
 	}
 	if s.Release != nil {

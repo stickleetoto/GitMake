@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	fmt.Println("GitMake Setup 0.7.3")
+	fmt.Println("GitMake Setup 0.8.0")
 	fmt.Println()
 	exe, err := os.Executable()
 	if err != nil {

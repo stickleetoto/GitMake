@@ -1,11 +1,11 @@
-# GitMake v0.7.3
+# GitMake v0.8.0
 
-GitMake turns a project ZIP into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
+GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
 ```text
-project ZIP
+project folder OR ZIP
    ↓
-discover + security preflight
+snapshot/discover + security preflight
    ↓
 reviewed plan
    ↓
@@ -16,7 +16,7 @@ commit + normal push
 optional Release + assets
 ```
 
-v0.7.3 adds a high-level MCP preparation tool, `gitmake_prepare`, on top of the v0.7.2 safety model. An AI can now take a ZIP-only folder from discovery to a reviewed plan in one GitMake tool call without using host filesystem Write/Edit tools.
+v0.8.0 adds **Folder Mode** while keeping the existing ZIP workflow. The same `gitmake_prepare` MCP entry point can now take either a live source tree or a ZIP snapshot to a reviewed plan, with the same security, identity, approval, and apply gates.
 
 ## Install
 
@@ -52,17 +52,69 @@ Requirements for publishing: Git, GitHub CLI `gh`, `gh auth login`, and a config
 ## Daily workflow
 
 ```text
-gitmake                         auto create/update current project
-gitmake Project.zip             explicit source ZIP
+gitmake                         auto-detect the current project folder or ZIP staging folder
+gitmake .                       explicitly publish the current project folder
+gitmake Project.zip             explicitly publish a ZIP snapshot
 gitmake --dry-run               preview only
 gitmake --dry-run --read-only --json
 gitmake --no-release            skip configured release
 ```
 
+## Folder Mode
+
+For a live project, run GitMake directly inside the source tree:
+
+```text
+MyProject/
+├─ README.md
+├─ src/
+├─ tests/
+└─ pyproject.toml
+
+> gitmake .
+```
+
+Folder Mode creates a deterministic temporary snapshot and then reuses the same publishing pipeline as ZIP Mode. It never commits the working tree directly. `gitmake.json`, `.git/`, `.gitmake/`, local dependency/cache directories, `.env`, and platform junk files are excluded by default.
+
+GitMake honors common root and nested `.gitignore` rules, plus an optional root `.gitmakeignore` for publish-only exclusions:
+
+```text
+# .gitmakeignore
+dataset/
+checkpoints/
+*.ckpt
+private/**
+```
+
+Only included files contribute to the reviewed source hash. Changing an ignored cache file does not stale a plan; changing an included source file does. Symlinks and unsafe/case-colliding paths are rejected.
+
+Folder config:
+
+```json
+{
+  "source": {
+    "folder": "."
+  }
+}
+```
+
+ZIP config remains supported unchanged:
+
+```json
+{
+  "source": {
+    "zip": "Demo_Source.zip",
+    "strip_root": true
+  }
+}
+```
+
+Exactly one of `source.folder` or `source.zip` may be configured.
+
 
 ## One-call AI preparation
 
-When GitMake MCP is available, agents should prefer the high-level `gitmake_prepare` tool for ZIP-only or unconfigured projects. It performs:
+When GitMake MCP is available, agents should prefer the high-level `gitmake_prepare` tool for folder, ZIP, or unconfigured projects. It performs:
 
 ```text
 source discovery
@@ -81,7 +133,7 @@ Agents are explicitly instructed not to create or edit `gitmake.json` with host 
 
 The default `sync.mode` is `managed`.
 
-On first adoption of an existing repository GitMake preserves files that exist only in the repository. It records only the source files it owns in `.gitmake/managed.json`. On later updates, a file is deleted only if GitMake previously managed it and the new source ZIP no longer contains it.
+On first adoption of an existing repository GitMake preserves files that exist only in the repository. It records only the source files it owns in `.gitmake/managed.json`. On later updates, a file is deleted only if GitMake previously managed it and the new source snapshot no longer contains it.
 
 Default protected paths:
 
@@ -90,7 +142,7 @@ Default protected paths:
 .gitmake/**
 ```
 
-This prevents a source ZIP from accidentally erasing repository-only workflows/configuration. Exact legacy mirror behavior is still available with:
+This prevents a source snapshot from accidentally erasing repository-only workflows/configuration. Exact legacy mirror behavior is still available with:
 
 ```json
 {
@@ -106,13 +158,14 @@ Protected paths remain protected in snapshot mode.
 
 GitMake now commits a protected repository identity record at `.gitmake/project.json`. On later updates it verifies that the cloned repository is still bound to the target owner/name before synchronization. A conflicting valid identity is a hard stop (`PROJECT_IDENTITY_MISMATCH`).
 
-A stale real `gitmake.json` is also never auto-retargeted to the only ZIP beside it. Starter placeholder configs can still self-heal, but an existing repository config with a missing `source.zip` must be fixed explicitly (`PROJECT_SOURCE_MISMATCH`).
+A stale real ZIP-based `gitmake.json` is also never auto-retargeted to a different lone ZIP beside it. Starter placeholder configs can still self-heal, but an existing repository config with a missing `source.zip` must be fixed explicitly (`PROJECT_SOURCE_MISMATCH`).
 
 Reviewed plans always expose:
 
 ```text
 working_directory
 config_path
+source_mode
 source_path
 repository
 remote_visibility
@@ -198,7 +251,7 @@ gitmake config patch --stdin --json
 
 Unknown fields are rejected and the complete normalized config is validated before replacement. `--dry-run` previews writes; `--read-only` blocks them.
 
-A typical v0.7 config:
+A typical ZIP config:
 
 ```json
 {

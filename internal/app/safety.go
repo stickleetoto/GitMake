@@ -10,6 +10,7 @@ import (
 	"gitmake/internal/approval"
 	"gitmake/internal/config"
 	"gitmake/internal/discovery"
+	"gitmake/internal/foldersource"
 	"gitmake/internal/planstore"
 	"gitmake/internal/securityscan"
 )
@@ -96,6 +97,12 @@ func runInspect(o Options) error {
 	} else {
 		report["discovery"] = d
 	}
+	fd, ferr := foldersource.DetectProject(cwd)
+	if ferr != nil {
+		report["folder_detection_error"] = ferr.Error()
+	} else {
+		report["folder_detection"] = fd
+	}
 
 	if o.JSON {
 		return emitJSON(report)
@@ -110,11 +117,14 @@ func runInspect(o Options) error {
 			fmt.Println("· Config               not present")
 		}
 	}
+	if fd.IsProject && fd.Confidence == "high" {
+		fmt.Printf("✓ Folder source        %s confidence\n", fd.Confidence)
+	}
 	if d.SelectedSource != "" {
-		fmt.Printf("✓ Source               %s · %.0f%% confidence\n", d.SelectedSource, d.SourceConfidenceScore*100)
+		fmt.Printf("✓ ZIP source           %s · %.0f%% confidence\n", d.SelectedSource, d.SourceConfidenceScore*100)
 	} else if d.NeedsInput {
-		fmt.Printf("× Source               needs input (%s)\n", d.Reason)
-	} else {
+		fmt.Printf("× ZIP source           needs input (%s)\n", d.Reason)
+	} else if !fd.IsProject {
 		fmt.Println("· Source               not resolved")
 	}
 	return nil
@@ -169,7 +179,7 @@ func fileExists(path string) bool {
 // still inspect wrapped errors, so returning the original error is enough.
 func pathCause(err error) error { return err }
 
-func projectConfigForSuggestion(projectDir, sourceZIP, repoName, visibility, branch string) (config.Config, error) {
+func projectConfigForSuggestion(projectDir, sourcePath, repoName, visibility, branch string) (config.Config, error) {
 	if strings.TrimSpace(projectDir) == "" {
 		var err error
 		projectDir, err = os.Getwd()
@@ -177,22 +187,16 @@ func projectConfigForSuggestion(projectDir, sourceZIP, repoName, visibility, bra
 			return config.Config{}, err
 		}
 	}
-	if sourceZIP == "" {
-		d, err := discovery.Analyze(projectDir)
+	if sourcePath == "" {
+		sel, err := inferSource(projectDir)
 		if err != nil {
 			return config.Config{}, err
 		}
-		if d.SelectedSource == "" {
-			if d.NeedsInput {
-				return config.Config{}, fmt.Errorf("source selection requires input: %s", d.Reason)
-			}
-			return config.Config{}, config.ErrNoProjectZIP
-		}
-		sourceZIP = filepath.Join(projectDir, d.SelectedSource)
-	} else if !filepath.IsAbs(sourceZIP) {
-		sourceZIP = filepath.Join(projectDir, sourceZIP)
+		sourcePath = sel.Path
+	} else if !filepath.IsAbs(sourcePath) {
+		sourcePath = filepath.Join(projectDir, sourcePath)
 	}
-	cfg, err := config.ConfigForZIP(filepath.Join(projectDir, "gitmake.json"), sourceZIP)
+	cfg, err := config.ConfigForSource(filepath.Join(projectDir, "gitmake.json"), sourcePath)
 	if err != nil {
 		return config.Config{}, err
 	}
@@ -205,8 +209,6 @@ func projectConfigForSuggestion(projectDir, sourceZIP, repoName, visibility, bra
 	if branch != "" {
 		cfg.Git.Branch = branch
 	}
-	// Re-parse normalized JSON to apply strict defaults/validation without
-	// exposing package-private default helpers.
 	b, err := config.MarshalNormalized(cfg)
 	if err != nil {
 		return config.Config{}, err
