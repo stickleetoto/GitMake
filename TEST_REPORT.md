@@ -1,81 +1,62 @@
-# GitMake v0.8.0 Test Report
+# GitMake v0.10.0 Test Report
 
-Date: 2026-08-21  
-Status: **PASS** for the implemented v0.8.0 Folder Mode scope.
+Date: 2026-08-22
 
-## Scope
+## Result
 
-v0.8.0 adds live project-folder input alongside the existing ZIP workflow while preserving the reviewed plan, security, managed-sync, project-identity, approval-token, and MCP apply gates.
+**PASS** for the v0.10.0 Guided UX + Trust & Recovery release gate.
 
-## Static / Go tests
+## Static / unit / race
 
 - `go test ./...` — PASS
 - `go vet ./...` — PASS
 - `go test -race ./...` — PASS
+- repository self secret-scan regression — PASS
+
+## v0.10.0 focused E2E
+
+`scripts/e2e_v0100.sh` — **V0100_GUIDED_UX_E2E_PASS**
+
+Covered:
+
+1. Reviewed plan JSON carries supported decision notes.
+2. Low-risk interactive Simple Mode shows `Why`, accepts ordinary confirmation, publishes, and emits the compact success result.
+3. `--yes` does not bypass a medium-risk visibility-mismatch plan; exact interactive `PUBLISH` is required.
+4. A destructive update requires the dynamic plan-bound `DELETE-XXXXXX` phrase before Simple Mode may continue.
+5. A likely secret finding is blocked with `SECRET_DETECTED` and guided exclusion/recovery hints.
+6. Windows `GitMake-Setup.exe` cross-compiles with the new first-run readiness flow.
 
 ## Regression suites
 
-- Base E2E — PASS (`ALL_E2E_PASS`)
-- v0.3 E2E — PASS (`V03_E2E_PASS`)
-- v0.4 E2E — PASS (`V04_E2E_PASS`)
-- v0.5 E2E — PASS (`V05_E2E_PASS`)
-- v0.5.1 E2E — PASS (`V051_E2E_PASS`)
-- v0.5.2 E2E — PASS (`V052_E2E_PASS`)
-- v0.6 MCP E2E — PASS (`V06_MCP_E2E_PASS`)
-- v0.6.1 AI setup E2E — PASS (`V061_AI_SETUP_E2E_PASS`)
-- v0.7 safety E2E — PASS (`V07_E2E_PASS`)
-- v0.7.2 safety E2E — PASS (`V072_SAFETY_E2E_PASS`)
-- v0.7.3 high-level prepare / safety E2E — PASS (`V073_SAFETY_E2E_PASS`)
-- v0.8.0 folder E2E — PASS (`V080_FOLDER_E2E_PASS`)
+The following suites were rerun successfully after rebasing historical assertions that intentionally conflicted with the v0.9 zero-config/help behavior:
 
-## v0.8.0 Folder Mode coverage
+- `scripts/e2e.sh` — PASS
+- `scripts/e2e_v03.sh` — PASS
+- `scripts/e2e_v04.sh` — PASS
+- `scripts/e2e_v05.sh` — PASS
+- `scripts/e2e_v051.sh` — PASS
+- `scripts/e2e_v052.sh` — PASS
+- `scripts/e2e_v06.sh` — PASS
+- `scripts/e2e_v061.sh` — PASS
+- `scripts/e2e_v07.sh` — PASS
+- `scripts/e2e_v072.sh` — PASS
+- `scripts/e2e_v073.sh` — PASS
+- `scripts/e2e_v080.sh` — PASS
+- `scripts/e2e_v090.sh` — PASS
 
-### Direct folder publish
+The rebased assertions preserve the tested functional semantics while accepting two intentional product changes from v0.9: normal publishing no longer writes a missing `gitmake.json`, and default help is deliberately the small Simple Mode surface.
 
-A project tree can be published directly with `gitmake .` / `source.folder`.
+## Safety invariants retained
 
-Verified:
-- folder input is detected and normalized;
-- `gitmake.json` is excluded from the source snapshot;
-- `.git/`, `.gitmake/`, `.env`, common local caches, and ignored files do not enter the snapshot;
-- common root/nested `.gitignore` rules and root `.gitmakeignore` rules are applied;
-- selected files pass through the existing secret scan and Git/GitHub preflight;
-- managed sync, project identity, commit, and push use the same existing pipeline as ZIP mode.
-
-### Deterministic snapshot / plan binding
-
-Verified:
-- folder plans record `source_mode: folder` and an absolute `source_path`;
-- ignored-file changes do **not** stale a reviewed plan;
-- included-file changes **do** stale a reviewed plan and block apply;
-- the snapshot hashes the exact bytes copied into the temporary snapshot, closing the plan-hash/copy TOCTOU gap;
-- symlinks, unsupported special files, unsafe relative paths, and case-colliding paths are rejected.
-
-### Source selection safety
-
-Verified:
-- a clear live project folder can be selected without first creating a ZIP;
-- an explicit folder or ZIP path is the strongest selection signal;
-- existing `source.zip` configs keep their ZIP semantics;
-- ambiguous/suspicious multi-ZIP selection is an error and is never converted into a successful no-op;
-- the user/agent can resolve ambiguity explicitly with `gitmake .` or `gitmake Project.zip`.
-
-### MCP high-level prepare
-
-Verified in a folder containing no project ZIP and no config:
-- `gitmake_prepare` detects Folder Mode;
-- it can infer config in memory under read-only MCP;
-- it produces a reviewed CREATE plan;
-- it does not create `gitmake.json` in read-only mode;
-- the result carries folder source provenance through the normal plan/risk pipeline.
-
-## Compatibility
-
-- Existing ZIP configs continue to use `source.zip` + optional `strip_root`.
-- Folder configs use `source.folder` and reject `strip_root`.
-- Exactly one of `source.zip` or `source.folder` is required.
-- Config schema remains `schema_version: 1` because the new source alternative is additive and old valid configs remain valid.
-
-## Known boundary
-
-The built-in ignore matcher intentionally targets common `.gitignore` patterns rather than claiming complete parity with every exotic Git ignore grammar edge case. Explicit `.gitmakeignore` remains available for publish-specific exclusions.
+- `--yes` cannot bypass medium/high-risk review
+- no force push
+- no Git history rewrite
+- no repository deletion
+- managed sync / protected paths
+- secret scan + large-file/LFS preflight
+- project identity binding
+- branch protection / tag conflict checks
+- immutable plan stale revalidation
+- one-shot human MCP approval
+- destructive mass-deletion gate
+- folder snapshot symlink / unsafe-path / case-collision defenses

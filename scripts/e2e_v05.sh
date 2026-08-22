@@ -12,7 +12,7 @@ python3 - "$TMP/manifest.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['schema']=='gitmake.ai/v1', x
-assert x['name']=='gitmake' and x['version']=='0.8.0', x
+assert x['name']=='gitmake' and x['version']=='0.10.0', x
 assert x['safety']['force_push'] is False
 assert '--dry-run' in x['commands']['preview']['command']
 assert '--read-only' in x['commands']['preview']['command']
@@ -68,7 +68,7 @@ test ! -e "$R/gitmake.json"
 python3 - "$TMP/version.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
-assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.8.0'}, x
+assert x == {'schema':'gitmake.version/v1','name':'gitmake','version':'0.10.0'}, x
 PY
 
 # 7. Generic JSON surfaces output without contaminating stdout with prose.
@@ -77,7 +77,7 @@ python3 - "$TMP/help.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['schema']=='gitmake.result/v1' and x['ok'] is True
-assert 'gitmake ai describe' in x['output']
+assert 'Everyday use' in x['output']
 PY
 
 # 8. AI-safe publish preview returns structured pipeline data and performs no GitHub mutation.

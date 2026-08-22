@@ -101,7 +101,7 @@ x=json.load(open(sys.argv[1],encoding='utf-8'))
 assert x['ok'] is False, x
 assert x['pipeline']['discovery']['needs_input'] is True, x
 assert x['pipeline']['discovery']['reason']=='multiple_source_candidates', x
-assert 'choose one explicitly' in x['error']['message'], x
+assert x['error']['code']=='SOURCE_AMBIGUOUS', x
 PY
 
 # 4. Explicit source always wins in an ambiguous folder and stays read-only.

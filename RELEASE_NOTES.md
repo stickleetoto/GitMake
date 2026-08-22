@@ -1,69 +1,58 @@
-# GitMake v0.8.0 — Folder or ZIP, Same Safe Workflow
+# GitMake v0.10.0 — Guided UX + Trust & Recovery
 
-v0.8.0 adds direct **project folder publishing** without removing or weakening GitMake's established ZIP workflow.
+v0.10.0 is the second half of the UX pass started in v0.9. It does not broaden GitMake into a general GitHub client. Instead it makes the existing zero-config folder/ZIP publishing flow easier to trust, easier to confirm, and easier to recover when GitMake intentionally blocks.
 
-## Two first-class source modes
+## 1. Risk-adaptive confirmation
 
-ZIP mode remains unchanged:
-
-```text
-gitmake Project.zip
-```
-
-Folder mode can now publish a live source tree:
+Simple Mode now changes confirmation friction according to the reviewed plan:
 
 ```text
-cd MyProject
-gitmake .
+low       → Publish? [Y/n]
+medium    → Type PUBLISH to continue
+high      → Type DELETE-XXXXXX to confirm
 ```
 
-A normal project directory can also be inferred by `gitmake` / `gitmake_prepare` when strong project markers are present.
+`--yes` is deliberately limited to low-risk plans and cannot bypass medium/high-risk confirmation. Destructive plans still retain the existing expert and one-shot human approval controls.
 
-## Folder snapshots, not direct working-tree commits
+## 2. Explain automatic decisions
 
-GitMake does not commit the live folder directly. It builds a deterministic temporary snapshot, then runs the same security, identity, managed-sync, planning, approval, and apply pipeline already used for ZIP sources.
+Reviewed plans now carry `decision_notes`, shown to humans as a compact `Why` section. GitMake only explains facts that were actually used by the resolved pipeline: zero-config inference, project-memory restoration, folder/ZIP source selection evidence, private zero-config default, preserved remote visibility, and verified/first-adoption project identity.
 
-Folder mode:
+## 3. Compact success result
 
-- honors common root/nested `.gitignore` rules;
-- supports a root `.gitmakeignore` for publish-only exclusions;
-- always excludes `.git/`, `.gitmake/`, `gitmake.json`, `.env`, common dependency/cache directories, and platform junk;
-- rejects symlinks, special files, unsafe relative paths, and case-colliding paths;
-- hashes only the selected publishable snapshot, so ignored-file changes do not stale a reviewed plan;
-- invalidates a reviewed plan when an included source file changes.
+Normal Simple Mode hides low-level pipeline chatter after success and shows the result that matters:
 
-## Config schema
+```text
+✓ Published GambleLM
 
-`source` now accepts exactly one mode:
+Repository  testuser/GambleLM
+Branch      main
+Changes     +2 ~4 -0
+Release     none
+Time        5.8s
 
-```json
-{"source":{"folder":"."}}
+https://github.com/testuser/GambleLM
 ```
 
-or:
+Use `--verbose` when the pipeline details are useful.
 
-```json
-{"source":{"zip":"Project.zip","strip_root":true}}
-```
+## 4. Guided error recovery
 
-Existing ZIP configs remain compatible with schema version 1.
+Friendly errors now include a stable code when available plus a `Recommended` section with the safest next action. GitMake can guide source disambiguation, GitHub login, Git LFS setup, exclusion of files that should never be published, and rebuilding stale plans. It intentionally does not auto-override project-identity mismatches or destructive safety gates.
 
-## MCP / LLM workflow
+## 5. First-run readiness UX
 
-`gitmake_prepare` is now the primary high-level entry point for **both folders and ZIPs**. It infers the source mode, creates a safe snapshot, validates or authors config through GitMake, runs preflight checks, and returns the immutable reviewed plan before any GitHub mutation.
+`GitMake-Setup.exe` now checks the full path from installation to first publish:
 
-Plans now explicitly carry `source_mode` (`folder` or `zip`) alongside `source_path` and the deterministic source SHA-256.
+- GitMake CLI + user PATH
+- Git
+- GitHub CLI
+- GitHub login
+- optional Claude Code
+- optional read-only GitMake MCP connection
 
-## Regression coverage
+When publishing prerequisites are ready, Setup finishes with a simple next action: open a project folder and run `gitmake`, or ask Claude to publish the project when MCP is connected.
 
-v0.8.0 adds E2E coverage for:
+## Compatibility and safety
 
-- direct folder publishing;
-- `.gitignore` / `.gitmakeignore` and hard default exclusions;
-- exclusion of `gitmake.json` and local secret/cache files from the repository;
-- folder-mode plan provenance;
-- ignored-file changes remaining plan-safe;
-- included-file changes making a plan stale;
-- MCP `gitmake_prepare` inferring a folder source with no ZIP and no config.
-
-All prior ZIP, MCP, safety-gate, project-identity, destructive-approval, AI setup, and release regression suites were rerun after the change.
+The v0.9 zero-config contract remains intact. Folder and ZIP mode, project memory, source ambiguity handling, reviewed plans, managed sync, protected paths, secret/large-file/LFS preflight, branch protection checks, project identity, stale-plan revalidation, one-shot MCP approvals, and no-force-push/no-history-rewrite/no-repo-delete invariants are preserved.

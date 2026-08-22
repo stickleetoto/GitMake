@@ -67,6 +67,7 @@ type Plan struct {
 	Identity         ProjectIdentity `json:"project_identity"`
 	Risk             Risk            `json:"risk"`
 	ReviewNotes      []string        `json:"review_notes,omitempty"`
+	DecisionNotes    []string        `json:"decision_notes,omitempty"`
 	Fingerprint      string          `json:"fingerprint"`
 }
 

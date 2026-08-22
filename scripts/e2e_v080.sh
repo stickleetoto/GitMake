@@ -252,7 +252,7 @@ assert body['plan']['mode']=='CREATE', body
 assert body['plan']['changes']['added']==2, body
 assert body['plan']['risk']['destructive'] is False, body
 assert not os.path.exists(os.path.join(cwd,'gitmake.json'))
-assert 'Do not write gitmake.json with host filesystem tools' in body['note'], body
+assert 'zero-config' in body['note'], body
 print(body['plan']['plan_id'])
 PYPREP
 
@@ -267,7 +267,7 @@ PYZIP
 python - "$BIN" "$PW" <<'PYPREPWRITE'
 import json, os, subprocess, sys
 bin,cwd=sys.argv[1:]
-req={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gitmake_prepare","arguments":{"project_dir":cwd}}}
+req={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gitmake_prepare","arguments":{"project_dir":cwd,"persist_config":True}}}
 p=subprocess.run([bin,'mcp','--allow-write'],cwd=cwd,env=os.environ.copy(),input=json.dumps(req)+'\n',text=True,capture_output=True)
 if p.returncode: raise SystemExit(p.stderr)
 r=json.loads(p.stdout)
@@ -293,14 +293,8 @@ printf 'TOKEN=local-only\n' > "$F/.env"
 printf 'ignore me\n' > "$F/debug.log"
 printf 'debug.log\n' > "$F/.gitignore"
 (cd "$F" && "$BIN" . >/dev/null)
-test -f "$F/gitmake.json"
-python - "$F/gitmake.json" <<'PYFOLDERCFG'
-import json,sys
-c=json.load(open(sys.argv[1],encoding='utf-8'))
-assert c['source']['folder']=='.', c
-assert 'zip' not in c['source'], c
-assert 'strip_root' not in c['source'], c
-PYFOLDERCFG
+test ! -f "$F/gitmake.json"
+test -f "$F/.gitmake/project.json"
 R="$TMP/remotes/testuser/folder_publish.git"
 test -d "$R"
 git --git-dir="$R" cat-file -e HEAD:README.md

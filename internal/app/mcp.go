@@ -152,7 +152,7 @@ func (s *mcpServer) tools() []mcpTool {
 	zipArg := map[string]any{"type": "string", "description": "Deprecated alias for source_path when the source is a ZIP."}
 	tools := []mcpTool{
 		{Name: "gitmake_describe", Description: "Return GitMake's machine-readable AI capability manifest.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
-		{Name: "gitmake_prepare", Description: "PRIMARY ENTRY POINT. High-level folder-or-ZIP to reviewed-plan workflow. Infer the source mode, validate config, run ignore/snapshot/security/preflight/project-identity checks, and create a reviewed plan. Use this tool when the user asks to prepare or publish a project. In read-only MCP mode, missing config stays in memory; with --allow-write it is persisted atomically by GitMake. Do NOT create or edit gitmake.json with host filesystem Write/Edit tools when this tool is available.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_path": sourceArg, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json through GitMake's validated atomic writer. Defaults to true only when MCP write access is enabled; false in read-only mode."}})},
+		{Name: "gitmake_prepare", Description: "PRIMARY ENTRY POINT. High-level folder-or-ZIP to reviewed-plan workflow. Infer the source mode, validate config, run ignore/snapshot/security/preflight/project-identity checks, and create a reviewed plan. Use this tool when the user asks to prepare or publish a project. In read-only MCP mode, missing config stays in memory; with --allow-write it is persisted atomically by GitMake. Do NOT create or edit gitmake.json with host filesystem Write/Edit tools when this tool is available.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_path": sourceArg, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json through GitMake's validated atomic writer. Defaults to false. Set true only when the user explicitly wants a persistent advanced gitmake.json."}})},
 		{Name: "gitmake_project_inspect", Description: "Inspect project config and ZIP discovery state without shell commands or project mutation.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_doctor", Description: "Diagnose Git, GitHub CLI, authentication, identity, installation, and project config without mutating the project.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_discover", Description: "Classify ZIP archives conservatively and identify likely project source/release assets without changing files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
@@ -209,7 +209,7 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 	case "gitmake_describe":
 		return invokeGitMakeJSON(projectDir, nil, "ai", "describe", "--json")
 	case "gitmake_prepare":
-		persist, err := boolArg(args, "persist_config", s.allowWrite)
+		persist, err := boolArg(args, "persist_config", false)
 		if err != nil {
 			return nil, err
 		}
@@ -426,7 +426,7 @@ func (s *mcpServer) prepareProject(projectDir, sourcePath string, persistConfig 
 		result["inferred_config"] = candidate
 	}
 	if !configPersisted {
-		result["note"] = "gitmake.json was intentionally kept in memory because MCP is read-only. The reviewed plan remains usable; a later approved apply can persist the same safe defaults after revalidation. Do not write gitmake.json with host filesystem tools."
+		result["note"] = "gitmake.json was intentionally kept in memory because GitMake is zero-config by default. The reviewed plan remains usable without persisting config. Use GitMake config tools only when advanced persistent settings are actually needed."
 	}
 	return result, nil
 }

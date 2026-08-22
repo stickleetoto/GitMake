@@ -31,11 +31,16 @@
     "internal/app/machine.go",
     "internal/app/mcp.go",
     "internal/app/mcp_test.go",
+    "internal/app/project_memory.go",
     "internal/app/release.go",
     "internal/app/risk.go",
     "internal/app/risk_test.go",
     "internal/app/safety.go",
+    "internal/app/simple.go",
+    "internal/app/simple_v09_test.go",
     "internal/app/source.go",
+    "internal/app/ux.go",
+    "internal/app/ux_v010_test.go",
     "internal/app/workflow.go",
     "internal/approval/approval.go",
     "internal/approval/approval_test.go",
@@ -73,6 +78,7 @@
     "internal/upgrader/upgrader.go",
     "internal/upgrader/upgrader_test.go",
     "scripts/e2e.sh",
+    "scripts/e2e_v0100.sh",
     "scripts/e2e_v03.sh",
     "scripts/e2e_v04.sh",
     "scripts/e2e_v05.sh",
@@ -83,6 +89,7 @@
     "scripts/e2e_v07.sh",
     "scripts/e2e_v072.sh",
     "scripts/e2e_v073.sh",
-    "scripts/e2e_v080.sh"
+    "scripts/e2e_v080.sh",
+    "scripts/e2e_v090.sh"
   ]
 }

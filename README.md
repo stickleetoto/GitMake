@@ -1,4 +1,4 @@
-# GitMake v0.8.0
+# GitMake v0.10.0
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,7 @@ commit + normal push
 optional Release + assets
 ```
 
-v0.8.0 adds **Folder Mode** while keeping the existing ZIP workflow. The same `gitmake_prepare` MCP entry point can now take either a live source tree or a ZIP snapshot to a reviewed plan, with the same security, identity, approval, and apply gates.
+v0.10.0 adds **Guided UX + Trust & Recovery** on top of the v0.9 zero-config/simple-mode foundation. GitMake now adapts confirmation friction to reviewed risk, explains the automatic decisions behind a plan, collapses successful publishes into a compact result card, gives actionable recovery guidance when it blocks, and turns the Windows installer into a readiness/setup experience. `gitmake.json` remains optional advanced configuration.
 
 ## Install
 
@@ -51,13 +51,98 @@ Requirements for publishing: Git, GitHub CLI `gh`, `gh auth login`, and a config
 
 ## Daily workflow
 
+For normal human use:
+
 ```text
-gitmake                         auto-detect the current project folder or ZIP staging folder
-gitmake .                       explicitly publish the current project folder
-gitmake Project.zip             explicitly publish a ZIP snapshot
-gitmake --dry-run               preview only
-gitmake --dry-run --read-only --json
-gitmake --no-release            skip configured release
+gitmake                         review + publish the current project
+gitmake Project.zip             review + publish a specific ZIP
+gitmake upgrade                 update GitMake
+```
+
+Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
+
+```text
+GitMake 0.10.0
+
+testuser/GambleLM
+Update · public
+
+Source     folder
+Changes    +2 ~4 -0
+Risk       low
+Release    none
+Plan       gm_...
+
+Why
+  ↳ Repository target was restored from .gitmake/project.json project memory.
+  ↳ Existing repository visibility is preserved; GitMake does not silently change it during an update.
+
+Publish update? [Y/n]:
+```
+
+Confirmation friction now follows the reviewed risk. `--yes` may accept **low-risk** Simple Mode plans only; it never bypasses medium/high-risk review. Medium-risk plans require an interactive `PUBLISH`, while high-risk/destructive plans require a plan-specific `DELETE-XXXXXX` confirmation. Existing expert `apply --destructive` and human-minted destructive MCP approval flows remain available.
+
+### Guided trust and recovery
+
+GitMake explains important automatic choices directly under the plan instead of asking the user to trust an opaque inference:
+
+```text
+Why
+  ↳ Configuration was inferred in memory; no gitmake.json was required.
+  ↳ Private visibility is the zero-config safety default for a new repository.
+```
+
+After a successful Simple Mode publish, the noisy internal pipeline is collapsed unless `--verbose` is requested:
+
+```text
+✓ Published GambleLM
+
+Repository  testuser/GambleLM
+Branch      main
+Changes     +2 ~4 -0
+Release     none
+Time        5.8s
+
+https://github.com/testuser/GambleLM
+```
+
+When GitMake blocks, it now follows the error with a `Recommended` section. Examples include choosing an explicit source for `SOURCE_AMBIGUOUS`, running `gh auth login` for missing GitHub auth, excluding files that should never be published after `SECRET_DETECTED`, and rebuilding a fresh plan after stale input/remote state. Safety-critical identity mismatches are never auto-fixed.
+
+### Zero-config by default
+
+A missing `gitmake.json` is inferred **in memory** and is not written as a side effect of publishing. Safe defaults remain: `main`, `private` for new repositories, managed sync, secret scan, and no release. Persist a config only when you actually need stable advanced settings:
+
+```text
+gitmake init .
+gitmake init Project.zip
+```
+
+### Project memory
+
+After a successful **folder** publish, GitMake stores the folder→repository binding in:
+
+```text
+.gitmake/project.json
+```
+
+That path is excluded from folder snapshots. If the local project folder is renamed, future zero-config runs still target the original repository. A conflicting binding is a hard `PROJECT_IDENTITY_MISMATCH` stop rather than an automatic retarget.
+
+### Source ambiguity
+
+When both the current folder and one or more ZIPs independently look like plausible project sources, GitMake does not guess. Interactive Simple Mode asks which one to use; machine/MCP callers receive `SOURCE_AMBIGUOUS` / `needs_input` and must provide an explicit source.
+
+### Simple vs expert
+
+The default help surface intentionally shows only everyday commands:
+
+```text
+gitmake help
+```
+
+Low-level config, plan/apply, diagnostics, MCP, and automation commands remain fully available behind:
+
+```text
+gitmake help --expert
 ```
 
 ## Folder Mode
@@ -125,7 +210,7 @@ source discovery
 → stop for human approval
 ```
 
-With the default read-only MCP registration, a missing `gitmake.json` stays in memory and GitHub is never mutated. The reviewed plan remains usable. If MCP write access was explicitly enabled with `gitmake ai setup --write`, `gitmake_prepare` may persist the inferred config through GitMake's validated atomic config writer; it still does not publish.
+A missing `gitmake.json` stays in memory by default **even when MCP write access is enabled**. Persistence is explicit (`persist_config: true`) and goes through GitMake's validated atomic config writer. `gitmake_prepare` still never publishes; it stops at a reviewed plan.
 
 Agents are explicitly instructed not to create or edit `gitmake.json` with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.
 
@@ -174,7 +259,7 @@ changes
 risk
 ```
 
-If at least 10 previously managed files and at least 30% of the managed baseline would be deleted, the plan is classified as destructive. Normal publish/apply/approval is blocked. A human must explicitly opt in:
+If at least 10 previously managed files and at least 30% of the managed baseline would be deleted, the plan is classified as destructive. GitMake never accepts that plan through `--yes` or an ordinary approval. Interactive Simple Mode requires the plan-specific `DELETE-XXXXXX` phrase; expert/MCP flows require an explicit destructive opt-in:
 
 ```text
 gitmake apply <plan_id> --destructive
@@ -418,37 +503,42 @@ UPGRADE_INTEGRITY_FAILED
 
 ## CLI
 
+Simple surface:
+
 ```text
-gitmake                         Publish/update current project
-gitmake Project.zip             Use a specific source ZIP
-gitmake init [Project.zip]      Create gitmake.json
+gitmake                         Review + publish current project
+gitmake Project.zip             Review + publish explicit ZIP
+gitmake upgrade                 Upgrade GitMake
+gitmake help                    Everyday help
+gitmake --version               Version
+```
+
+Expert surface (`gitmake help --expert`) keeps the full interface:
+
+```text
+gitmake init [source]           Persist optional gitmake.json
 gitmake doctor                  Diagnose environment/install state
 gitmake inspect                 Inspect project/config state
 gitmake discover                Classify ZIP candidates
-gitmake plan [Project.zip]      Store reviewed plan
+gitmake plan [source]           Store reviewed plan
 gitmake approve <plan_id>       Human-mint one-shot MCP approval
 gitmake apply <plan_id>         Revalidate + locally apply plan
 gitmake history                 Read audit history
 
-gitmake config schema           Authoritative JSON Schema
-gitmake config validate         Validate gitmake.json
-gitmake config write --stdin    Validate + atomically write config
-gitmake config patch --stdin    Merge + validate config patch
+gitmake config schema
+gitmake config validate
+gitmake config write --stdin
+gitmake config patch --stdin
 
-gitmake ai describe             Agent capability manifest
-gitmake ai install              Managed AGENTS.md guidance
-gitmake ai setup                One-click Claude read-only MCP
-gitmake ai setup --write        Guarded write MCP
+gitmake ai describe
+gitmake ai install
+gitmake ai setup
+gitmake ai setup --write
 gitmake ai setup --client generic --json
 gitmake ai status
 gitmake ai remove
 gitmake mcp
 gitmake mcp --allow-write
-
-gitmake install
-gitmake upgrade
-gitmake help
-gitmake --version
 ```
 
 ## Safety invariants
@@ -462,7 +552,7 @@ gitmake --version
 - secret + large-file/LFS preflight before mutation
 - required-PR branch policy is not bypassed
 - bare tag conflicts are not silently reused
-- ambiguous source ZIPs are not guessed
+- ambiguous folder/ZIP source candidates are not guessed
 - agent-authored config is schema/semantic validated
 - reviewed plans reject stale inputs/remote state
 - MCP apply requires a human-minted one-shot approval token

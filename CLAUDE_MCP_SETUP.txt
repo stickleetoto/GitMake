@@ -1,4 +1,4 @@
-GitMake v0.8.0 + AI/MCP
+GitMake v0.10.0 + AI/MCP
 =======================
 
 CLAUDE CODE (recommended one-click path)
@@ -39,7 +39,7 @@ Guarded write surface:
 
 GitMake's MCP surface intentionally covers project inspection, discovery, schema/config handling, preview, plan, history, and approved apply. It does not expose force push, repository deletion, history rewrite, or an unreviewed direct-publish tool.
 
-HIGH-LEVEL PREPARE (v0.8.0)
+HIGH-LEVEL PREPARE (v0.10.0)
 
 For folder, ZIP, or unconfigured projects, prefer the MCP tool:
 
@@ -49,4 +49,4 @@ It infers folder-or-ZIP source mode -> builds a safe snapshot -> config inferenc
 
 In default read-only mode, missing gitmake.json stays in memory. Do NOT use Claude Write/Edit to create gitmake.json when gitmake_prepare or gitmake_config_write is available.
 
-With `gitmake ai setup --write`, gitmake_prepare may persist a missing config through GitMake's atomic writer, but it still stops before apply.
+GitMake is zero-config by default even with write-enabled MCP. `gitmake_prepare` keeps missing config in memory unless `persist_config: true` is explicitly requested. It always stops before apply.

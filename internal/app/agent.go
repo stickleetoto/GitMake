@@ -51,12 +51,12 @@ func aiManifest() AIManifest {
 		Schema:      "gitmake.ai/v1",
 		Name:        "gitmake",
 		Version:     Version,
-		Description: "GitMake publishes project folders or ZIP snapshots to GitHub repositories and optional GitHub Releases.",
+		Description: "GitMake publishes project folders or ZIP snapshots to GitHub repositories and optional GitHub Releases with zero-config safe defaults.",
 		Purpose:     "Use GitMake when a user wants to create, update, validate, diagnose, or release a project through GitHub without manually composing git/gh workflows.",
 		Capabilities: []AICapability{
 			{Name: "publish", Description: "Create a missing GitHub repository or update an existing one from a project folder or ZIP snapshot while preserving Git history.", Mutating: true},
 			{Name: "release", Description: "Create an optional GitHub Release and upload configured assets.", Mutating: true},
-			{Name: "init", Description: "Create a project gitmake.json configuration.", Mutating: true},
+			{Name: "init", Description: "Persist an optional advanced gitmake.json configuration; normal publishing is zero-config by default.", Mutating: true},
 			{Name: "doctor", Description: "Diagnose Git, GitHub CLI, authentication, Git identity, installation, and project configuration.", Mutating: false},
 			{Name: "describe", Description: "Return this machine-readable GitMake capability manifest.", Mutating: false},
 			{Name: "discover", Description: "Classify multiple ZIP files and identify the likely project source versus release assets without modifying the project.", Mutating: false},
@@ -69,10 +69,10 @@ func aiManifest() AIManifest {
 			{Name: "ai_setup", Description: "Register GitMake MCP with Claude Code or export a generic stdio descriptor for other MCP clients. Read-only access is the default.", Mutating: true},
 		},
 		Commands: map[string]AICommand{
-			"publish":          {Command: "gitmake --json", Description: "Publish/update according to gitmake.json.", Mutating: true},
+			"publish":          {Command: "gitmake --json", Description: "Publish/update using an existing config or zero-config inferred settings and project memory.", Mutating: true},
 			"preview":          {Command: "gitmake --dry-run --read-only --json", Description: "Safely plan a publish without changing local project config or GitHub.", Mutating: false},
 			"mcp_prepare":      {Command: "MCP tool: gitmake_prepare", Description: "Preferred one-call folder-or-ZIP to reviewed-plan workflow. Never use host filesystem Write/Edit to create gitmake.json when this tool is available.", Mutating: false},
-			"init":             {Command: "gitmake init --yes", Description: "Create gitmake.json using safe defaults.", Mutating: true},
+			"init":             {Command: "gitmake init --yes", Description: "Persist gitmake.json only when advanced stable settings are desired.", Mutating: true},
 			"doctor":           {Command: "gitmake doctor --json", Description: "Return environment diagnostics.", Mutating: false},
 			"discover":         {Command: "gitmake discover --json", Description: "Classify ZIPs and resolve or report source ambiguity without writing files.", Mutating: false},
 			"describe":         {Command: "gitmake ai describe --json", Description: "Return the AI capability manifest.", Mutating: false},
@@ -99,7 +99,7 @@ func aiManifest() AIManifest {
 			"Run `gitmake ai describe --json` if GitMake capabilities are unknown.",
 			"Run `gitmake doctor --json` when environment health is uncertain.",
 			"Use `gitmake discover --json` when a folder contains multiple ZIPs and source selection is uncertain.",
-			"When the MCP tool `gitmake_prepare` is available, prefer it for folder, ZIP, or unconfigured projects. It owns source-mode inference, config inference/validation, snapshot filtering, preflight, identity checks, and reviewed plan creation. Do not create or edit gitmake.json with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.",
+			"When the MCP tool `gitmake_prepare` is available, prefer it for folder, ZIP, or unconfigured projects. GitMake is zero-config by default: keep inferred settings in memory unless persistent advanced configuration is explicitly requested. Do not create or edit gitmake.json with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.",
 			"Before authoring gitmake.json manually, read `gitmake config schema --json`; never guess configuration fields.",
 			"When writing agent-authored config outside gitmake_prepare, use `gitmake config write --stdin --json` rather than editing gitmake.json directly, then validate it.",
 			"Validate agent-authored configuration with `gitmake config validate --json`.",
@@ -120,7 +120,7 @@ func runAIDescribe(o Options) error {
 	}
 	fmt.Printf("GitMake AI Interface · %s\n\n", Version)
 	fmt.Println("Purpose")
-	fmt.Println("  Publish project folders or ZIP snapshots to GitHub repositories and optional Releases.")
+	fmt.Println("  Publish project folders or ZIP snapshots with zero-config safe defaults and optional Releases.")
 	fmt.Println("\nUse when")
 	fmt.Println("  - creating or updating a GitHub repository from a project folder or ZIP")
 	fmt.Println("  - creating a GitHub Release with assets")
@@ -205,8 +205,8 @@ Safe agent workflow:
 1. Discover capabilities with ` + "`gitmake ai describe --json`" + `.
 2. Check the environment with ` + "`gitmake doctor --json`" + ` when needed.
 3. If multiple ZIPs are present, inspect classification with ` + "`gitmake discover --json`" + `. For a live source tree, GitMake can use ` + "source.folder" + ` (normally ` + "`.`" + `) and honors common .gitignore rules plus .gitmakeignore.
-4. Before creating or changing ` + "`gitmake.json`" + `, read ` + "`gitmake config schema --json`" + `. Prefer ` + "`gitmake config write --stdin --json`" + ` (or config patch) over direct file editing, then validate with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
-5. Preview changes with ` + "`gitmake --dry-run --read-only --json`" + `. GitMake may infer a missing config in memory without writing it.
+4. ` + "`gitmake.json`" + ` is optional advanced configuration. Before creating or changing it, read ` + "`gitmake config schema --json`" + `. Prefer ` + "`gitmake config write --stdin --json`" + ` (or config patch) over direct file editing, then validate with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
+5. Preview changes with ` + "`gitmake --dry-run --read-only --json`" + `. GitMake normally infers a missing config in memory without writing it and remembers successful folder targets in ` + "`.gitmake/project.json`" + `.
 6. For approval-sensitive work, use ` + "`gitmake plan --json`" + `. Always show the plan provenance (working directory, config, source mode/path, repository), changes, and risk to the user. For MCP apply, the user must create a one-shot token with ` + "`gitmake approve <plan_id>`" + `. If GitMake marks the plan destructive, normal approval is invalid and only the user may run ` + "`gitmake approve <plan_id> --destructive`" + `. Direct local CLI apply likewise requires ` + "`--destructive`" + ` for destructive plans.
 7. Treat security scan findings, branch-protection blocks, tag conflicts, and multi-ZIP ambiguity as hard stops. Do not bypass them with raw git/gh commands.
 

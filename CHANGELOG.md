@@ -1,3 +1,26 @@
+## v0.10.0 — Guided UX + Trust & Recovery
+
+- Added risk-adaptive Simple Mode confirmation: low risk uses `[Y/n]`, medium risk requires exact `PUBLISH`, and high/destructive plans require a plan-specific `DELETE-XXXXXX` phrase.
+- Restricted `--yes` to low-risk Simple Mode plans; it cannot bypass medium/high-risk human review.
+- Added `decision_notes` to reviewed plans and a human-readable `Why` section so automatic source/config/visibility/identity choices expose their actual evidence.
+- Added a compact Simple Mode success result with repository, branch, change counts, release, elapsed time, and repository URL; detailed pipeline logs remain available with `--verbose`.
+- Added guided error recovery with stable machine error codes plus actionable `Recommended` next steps for secrets, stale plans/remotes, ambiguous sources, GitHub auth, Git LFS, identity mismatches, and destructive-change blocks.
+- Redesigned `GitMake-Setup.exe` as a first-run readiness flow: install/PATH, Git, GitHub CLI, GitHub login, optional Claude Code detection, read-only MCP connection, and clear next actions.
+- Preserved v0.9 zero-config, project-memory, folder/ZIP ambiguity, Simple/Expert split, one-shot MCP approval, managed sync, secret scanning, and all existing safety invariants.
+- Added v0.10 unit/E2E coverage for low/medium/high confirmation behavior, decision explanations, compact success output, guided recovery, setup build, and regression compatibility.
+
+## v0.9.0 — Simple Mode + Zero-Config
+
+- Made missing `gitmake.json` a true zero-config path: inferred settings stay in memory and are no longer written as a side effect of normal publish/plan/apply.
+- Added interactive Simple Mode for `gitmake` / `gitmake Project.zip`: create a reviewed plan, show target/source/changes/risk/release, ask once, then apply the exact plan.
+- Kept non-interactive automation non-blocking; `--yes` explicitly accepts safe Simple Mode confirmation while destructive plans still require the expert `--destructive` workflow.
+- Added local folder project memory in `.gitmake/project.json`; a renamed project folder continues to target the original owner/repository without requiring config.
+- Added project-memory mismatch hard stops instead of silently retargeting a folder that was previously bound to another repository.
+- Added folder-vs-ZIP ambiguity detection. Interactive Simple Mode asks which source to use; machine/MCP flows return `SOURCE_AMBIGUOUS` instead of guessing.
+- Split CLI documentation into a tiny default `gitmake help` surface and `gitmake help --expert` for config/plan/MCP/diagnostic commands.
+- Changed `gitmake_prepare` so zero-config remains the default even with MCP write access; persistent config now requires explicit `persist_config: true`.
+- Added v0.9 E2E coverage for zero-config folder publish, project memory after local rename, source ambiguity, interactive Simple Mode, help-surface split, and explicit MCP config persistence.
+
 ## v0.8.0 — Folder or ZIP, Same Safe Workflow
 
 - Added first-class `source.folder` alongside the existing `source.zip` mode; exactly one source mode is required.

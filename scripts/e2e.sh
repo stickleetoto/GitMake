@@ -136,7 +136,7 @@ PY
 A="$TMP/한글 경로/첫 생성"; mkdir -p "$A"
 makezip "$A/Demo_v1.0.0.zip" 'Demo/README.md=hello' 'Demo/old.txt=old'
 (cd "$A" && "$BIN" >create.log 2>&1)
-grep -q '"name": "Demo"' "$A/gitmake.json"
+test ! -e "$A/gitmake.json"
 test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 1
 
 # B. Update mirror: modify/add/delete and preserve history.
@@ -159,8 +159,8 @@ grep -q 'No project source could be selected in this folder' "$D/nozip.log"
 # E. Placeholder starter repairs itself when one ZIP is added later.
 makezip "$D/Recover_v2.0.zip" 'Recover/file.txt=ok'
 (cd "$D" && "$BIN" >recover.log 2>&1)
-grep -q '"name": "Recover"' "$D/gitmake.json"
-grep -q '"zip": "Recover_v2.0.zip"' "$D/gitmake.json"
+test ! -e "$D/gitmake.json"
+test -d "$TMP/remotes/testuser/Recover.git"
 
 # F. Multiple ZIP ambiguity lists candidates and does not mutate GitHub.
 F="$TMP/multi"; mkdir -p "$F"

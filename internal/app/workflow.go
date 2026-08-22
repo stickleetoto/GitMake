@@ -91,6 +91,7 @@ func runPlan(o Options) error {
 	if p.Release.Enabled {
 		fmt.Printf("· Release              %s · %d assets\n", p.Release.Tag, len(p.Release.Assets))
 	}
+	printDecisionNotes(p.DecisionNotes)
 	fmt.Printf("· Stored               %s\n", path)
 	if strings.TrimSpace(output) != "" && o.Verbose {
 		fmt.Println("\nPreview output:\n" + strings.TrimSpace(output))

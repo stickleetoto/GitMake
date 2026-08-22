@@ -22,7 +22,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.8.0"
+const Version = "0.10.0"
 
 type Options struct {
 	Command       string
@@ -46,6 +46,7 @@ type Options struct {
 	ApprovalToken string
 	Destructive   bool
 	AIClient      string
+	ExpertHelp    bool
 	State         *PipelineState
 }
 
@@ -122,19 +123,12 @@ func printFriendlyError(err error) {
 	fmt.Fprintln(os.Stderr, "GitMake couldn't continue.")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "×", msg)
-	lower := strings.ToLower(msg)
-	switch {
-	case strings.Contains(lower, "github cli") && strings.Contains(lower, "not found"):
-		fmt.Fprintln(os.Stderr, "\nInstall GitHub CLI (`gh`) and run GitMake again.")
-	case strings.Contains(lower, "git not found"):
-		fmt.Fprintln(os.Stderr, "\nInstall Git and run GitMake again.")
-	case strings.Contains(lower, "gh auth login") || strings.Contains(lower, "authentication"):
-		fmt.Fprintln(os.Stderr, "\nRun:\n  gh auth login")
-	case strings.Contains(lower, "user.name") || strings.Contains(lower, "user.email"):
-		fmt.Fprintln(os.Stderr, "\nConfigure your Git identity, for example:\n  git config --global user.name \"Your Name\"\n  git config --global user.email \"you@example.com\"")
-	case strings.Contains(lower, "multiple zip") || strings.Contains(lower, "multiple zip files"):
-		fmt.Fprintln(os.Stderr, "\nSelect the source explicitly:\n  gitmake YourProject.zip")
+	me := classifyMachineError(err, nil)
+	if me != nil && me.Code != "RUNTIME_ERROR" {
+		fmt.Fprintf(os.Stderr, "\nCode: %s\n", me.Code)
 	}
+	printGuidedRecovery(err)
+	fmt.Fprintln(os.Stderr, "\nNothing was published unless GitMake had already reported a completed push before this error.")
 	fmt.Fprintln(os.Stderr, "\nDiagnostics:\n  gitmake doctor\n  gitmake --verbose")
 }
 
@@ -205,6 +199,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.AIWrite, "write", false, "configure an AI client with reviewed GitMake write tools")
 	fs.StringVar(&o.ApprovalToken, "approval", "", "one-shot approval token for MCP plan apply")
 	fs.BoolVar(&o.Destructive, "destructive", false, "explicitly approve a plan classified as destructive")
+	fs.BoolVar(&o.ExpertHelp, "expert", false, "show expert/low-level commands with gitmake help")
 	fs.StringVar(&o.AIClient, "client", "claude", "AI client for setup/status/remove: claude or generic")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
@@ -218,6 +213,9 @@ func parseArgs(args []string) (Options, error) {
 	}
 	if o.Destructive && o.Command != "approve" && o.Command != "apply" {
 		return Options{}, errors.New("--destructive is only valid with `gitmake approve` or `gitmake apply`")
+	}
+	if o.ExpertHelp && o.Command != "help" {
+		return Options{}, errors.New("--expert is only valid with `gitmake help`")
 	}
 	if o.MCPAllowWrite && o.Command != "mcp" {
 		return Options{}, errors.New("--allow-write is only valid with `gitmake mcp`")
@@ -309,7 +307,7 @@ func Run(o Options) error {
 	}
 	switch o.Command {
 	case "help":
-		printHelp()
+		printHelp(o.ExpertHelp)
 		return nil
 	case "doctor":
 		return runDoctor(o)
@@ -346,18 +344,45 @@ func Run(o Options) error {
 	case "ai-remove":
 		return runAIRemove(o)
 	default:
+		if shouldUseSimpleMode(o) {
+			return runSimplePublish(o)
+		}
 		return runPublish(o)
 	}
 }
 
-func printHelp() {
-	fmt.Printf(`GitMake %s
+func printHelp(expert bool) {
+	if !expert {
+		fmt.Printf(`GitMake %s
 
-Usage:
-  gitmake                     Publish/update the project in this folder
-  gitmake .                   Publish the current project folder explicitly
-  gitmake Project.zip         Publish a specific ZIP snapshot
-  gitmake init [source]       Create gitmake.json for a folder or ZIP
+Everyday use:
+  gitmake                     Prepare, review, and publish the current project
+  gitmake Project.zip         Prepare, review, and publish a ZIP snapshot
+  gitmake upgrade             Upgrade GitMake
+  gitmake --version           Print GitMake version
+
+GitMake is zero-config by default. It can infer safe settings in memory and
+remembers a successfully published folder in .gitmake/project.json.
+
+If more than one source looks valid, GitMake asks instead of guessing.
+For advanced configuration, diagnostics, plans, MCP, and automation:
+  gitmake help --expert
+
+Safety:
+  GitMake never force-pushes, rewrites history, or deletes repositories.
+  Secret/large-file/project-identity/destructive-change gates remain active.
+`, Version)
+		return
+	}
+	fmt.Printf(`GitMake %s · Expert help
+
+Simple commands:
+  gitmake                     Prepare, review, and publish the current project
+  gitmake Project.zip         Prepare, review, and publish a ZIP snapshot
+  gitmake upgrade             Upgrade GitMake
+
+Project/config commands:
+  gitmake init [source]       Persist an optional advanced gitmake.json
   gitmake doctor              Check Git, GitHub CLI, login, identity, and PATH
   gitmake discover            Classify project/release ZIPs without changing files
   gitmake plan [source]       Create an immutable reviewed publish plan
@@ -365,24 +390,28 @@ Usage:
   gitmake approve <plan_id>   Create a one-shot MCP approval token
   gitmake inspect             Inspect project/config/security state without mutation
   gitmake history             Show recent GitMake publish/apply operations
-  gitmake mcp                 Run the local MCP server (read-only tools by default)
   gitmake config schema       Print the machine-readable config schema
   gitmake config validate     Validate gitmake.json
   gitmake config write --stdin  Validate and write config JSON from stdin
   gitmake config patch --stdin  Merge a JSON patch into gitmake.json
-  gitmake install             Install GitMake for the current user
-  gitmake upgrade             Upgrade GitMake from its latest GitHub Release
+
+AI/MCP commands:
+  gitmake mcp                 Run the local MCP server (read-only tools by default)
   gitmake ai describe         Explain GitMake capabilities to AI agents
   gitmake ai install          Install managed AGENTS.md + .gitmake/ai.json guidance
   gitmake ai setup            Connect GitMake MCP (Claude by default; read-only)
   gitmake ai status           Show AI client / GitMake MCP connection status
   gitmake ai remove           Remove GitMake-managed AI registration
 
+Install/update:
+  gitmake install             Install GitMake for the current user
+  gitmake upgrade             Upgrade from the latest GitHub Release
+
 Common options:
   --dry-run       Preview without changing GitHub
   --no-release    Skip the configured Release for this run
   --verbose       Show external commands
-  --yes           Accept safe setup defaults (mainly for gitmake init)
+  --yes           Accept a safe low-risk publish/setup without prompting
   --json          Emit machine-readable JSON
   --read-only     Block mutations; combine with --dry-run for safe AI previews
   --allow-write   In MCP mode, expose config write/patch and approved plan apply tools
@@ -751,10 +780,11 @@ func runPublish(o Options) error {
 				o.State.Discovery = discoveryStateFromReport(*source.Discovery)
 			}
 			if err != nil {
-				// Ambiguous or suspicious ZIP selections are safety decisions, not
-				// onboarding. Never turn them into a successful no-op: require the
-				// caller to choose an explicit source.
-				if source.Discovery != nil && source.Discovery.NeedsInput {
+				// Ambiguity is always a safety decision. Interactive Simple Mode
+				// resolves it before planning; machine/non-interactive callers get a
+				// hard SOURCE_AMBIGUOUS result instead of a guessed source.
+				var amb *sourceAmbiguityError
+				if errors.As(err, &amb) || (source.Discovery != nil && source.Discovery.NeedsInput) {
 					return err
 				}
 				if o.ReadOnly || o.JSON {
@@ -773,18 +803,24 @@ func runPublish(o Options) error {
 		if err != nil {
 			return err
 		}
-		if !o.ReadOnly {
-			cfg, err = createConfigForSelection(configPath, source)
-			if err != nil {
-				return err
-			}
-			configPersisted = true
-		}
+		// v0.9 is zero-config by default. Missing gitmake.json stays in
+		// memory unless the user explicitly runs `gitmake init` or a config
+		// authoring command. This keeps the simple path free of setup files.
 	}
 
 	source.Path, err = filepath.Abs(source.Path)
 	if err != nil {
 		return fmt.Errorf("resolve source path: %w", err)
+	}
+	memoryUsed := false
+	if !configPersisted {
+		memoryUsed, err = applyFolderProjectMemory(source, &cfg)
+		if err != nil {
+			return err
+		}
+		if memoryUsed {
+			configSource = "project_memory"
+		}
 	}
 	sourceSHA, err := hashSelectedSource(source)
 	if err != nil {
@@ -829,11 +865,18 @@ func runPublish(o Options) error {
 		}
 	}
 	target := owner + "/" + cfg.Repo.Name
+	if err := validateFolderProjectMemory(source, target); err != nil {
+		return err
+	}
 	repoInfo, exists, err := gh.Repo(owner, cfg.Repo.Name)
 	if err != nil {
 		return err
 	}
+	if memoryUsed && exists && strings.TrimSpace(repoInfo.Visibility) != "" {
+		cfg.Repo.Visibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
+	}
 	if o.State != nil {
+		o.State.Visibility = cfg.Repo.Visibility
 		o.State.Repository = target
 		if exists {
 			o.State.Mode = "UPDATE"
@@ -871,11 +914,10 @@ func runPublish(o Options) error {
 		fmt.Printf("✓ Source selected       %s\n", sourceDisplay(source))
 	}
 	if configSource == "inferred" {
-		if o.ReadOnly {
-			fmt.Printf("· Config inferred       memory only · %s mode\n", source.Mode)
-		} else {
-			fmt.Printf("✓ Config created        %s\n", configPath)
-		}
+		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
+	} else if configSource == "project_memory" {
+		fmt.Printf("✓ Project memory        %s\n", target)
+		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
 	}
 	fmt.Printf("· Source mode           %s\n", source.Mode)
 	fmt.Printf("· Source path           %s\n", source.Path)
@@ -935,6 +977,11 @@ func runPublish(o Options) error {
 		}
 	} else {
 		if err := createFlow(o, cfg, target, snapshot, git, gh, release); err != nil {
+			return err
+		}
+	}
+	if !o.DryRun {
+		if err := rememberFolderProject(source, target); err != nil {
 			return err
 		}
 	}

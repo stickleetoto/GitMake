@@ -64,8 +64,8 @@ PY
 # no ZIP: onboarding and no placeholder mutation
 P="$TMP/nozip"; mkdir -p "$P"; (cd "$P" && "$BIN" >o 2>&1); grep -q 'No project source could be selected' "$P/o"; test ! -e "$P/gitmake.json"
 
-# one ZIP: config + CREATE in one run
-P="$TMP/demo"; mkdir -p "$P"; makezip "$P/Demo_v1.0.0.zip" 'Demo/a.txt=a'; (cd "$P" && "$BIN" >o 2>&1); grep -q 'Repository created' "$P/o"; test -f "$P/gitmake.json"; test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 1
+# one ZIP: zero-config CREATE in one run
+P="$TMP/demo"; mkdir -p "$P"; makezip "$P/Demo_v1.0.0.zip" 'Demo/a.txt=a'; (cd "$P" && "$BIN" >o 2>&1); grep -q 'Repository created' "$P/o"; test ! -f "$P/gitmake.json"; test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 1
 
 # update + concise change counts
 makezip "$P/Demo_v1.0.0.zip" 'Demo/a.txt=aa' 'Demo/b.txt=b'; (cd "$P" && "$BIN" >u 2>&1); grep -q 'Repository updated' "$P/u"; grep -q '+1 ~1 -0' "$P/u"; test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 2
@@ -74,10 +74,10 @@ makezip "$P/Demo_v1.0.0.zip" 'Demo/a.txt=aa' 'Demo/b.txt=b'; (cd "$P" && "$BIN" 
 (cd "$P" && "$BIN" >n 2>&1); grep -q 'already up to date' "$P/n"; test "$(git --git-dir="$TMP/remotes/testuser/Demo.git" rev-list --count HEAD)" = 2
 
 # multiple ZIPs gives explicit syntax hint
-Q="$TMP/multi"; mkdir -p "$Q"; makezip "$Q/A.zip" 'a=x'; makezip "$Q/B.zip" 'b=x'; if (cd "$Q" && "$BIN" >m 2>&1); then exit 10; fi; grep -q 'gitmake Project.zip' "$Q/m"
+Q="$TMP/multi"; mkdir -p "$Q"; makezip "$Q/A.zip" 'a=x'; makezip "$Q/B.zip" 'b=x'; if (cd "$Q" && "$BIN" >m 2>&1); then exit 10; fi; grep -q 'Project.zip' "$Q/m"
 
-# positional ZIP disambiguates and creates config
-R="$TMP/positional"; mkdir -p "$R"; makezip "$R/Chosen_v3.0.zip" 'Chosen/c.txt=c'; makezip "$R/asset.zip" 'asset.txt=x'; (cd "$R" && "$BIN" Chosen_v3.0.zip >p 2>&1); grep -q 'Repository created' "$R/p"; grep -q 'Chosen_v3.0.zip' "$R/gitmake.json"
+# positional ZIP disambiguates without persisting config
+R="$TMP/positional"; mkdir -p "$R"; makezip "$R/Chosen_v3.0.zip" 'Chosen/c.txt=c'; makezip "$R/asset.zip" 'asset.txt=x'; (cd "$R" && "$BIN" Chosen_v3.0.zip >p 2>&1); grep -q 'Repository created' "$R/p"; test ! -f "$R/gitmake.json"
 
 # init does not publish
 I="$TMP/init"; mkdir -p "$I"; makezip "$I/Init_v1.0.zip" 'Init/x=x'; (cd "$I" && "$BIN" init --yes >i 2>&1); grep -q 'Run `gitmake` to publish' "$I/i"; test ! -d "$TMP/remotes/testuser/Init.git"

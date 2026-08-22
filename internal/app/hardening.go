@@ -184,6 +184,7 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 		"Verify working_directory, config_path, source_mode, source_path, and repository before approval.",
 		"A destructive plan requires a separate --destructive human approval and cannot use a normal approval token.",
 	}
+	p.DecisionNotes = decisionNotesFromState(s)
 	if s.Release != nil {
 		p.Release.Enabled = s.Release.Enabled
 		p.Release.Tag = s.Release.Tag

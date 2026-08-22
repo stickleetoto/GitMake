@@ -12,6 +12,30 @@ import (
 	"gitmake/internal/foldersource"
 )
 
+type sourceCandidate struct {
+	Mode        string
+	Path        string
+	Label       string
+	Recommended bool
+}
+
+type sourceAmbiguityError struct {
+	Candidates []sourceCandidate
+}
+
+func (e *sourceAmbiguityError) Error() string {
+	if e == nil || len(e.Candidates) == 0 {
+		return "multiple source candidates found"
+	}
+	var b strings.Builder
+	b.WriteString("multiple source candidates found; GitMake will not guess:")
+	for _, c := range e.Candidates {
+		b.WriteString("\n  - ")
+		b.WriteString(c.Label)
+	}
+	return b.String()
+}
+
 type sourceSelection struct {
 	Mode      string
 	Path      string
@@ -76,6 +100,33 @@ func inferSource(cwd string) (sourceSelection, error) {
 	if err != nil {
 		return sourceSelection{}, err
 	}
+
+	folderStrong := fd.IsProject && (fd.Confidence == "high" || fd.Confidence == "medium")
+	zipStrong := dr.SelectedSource != "" && dr.SourceConfidence != "single_archive_low" && dr.SelectedSourceScore >= 6
+	if folderStrong && zipStrong {
+		return sourceSelection{Folder: &fd, Discovery: &dr}, &sourceAmbiguityError{Candidates: []sourceCandidate{
+			{Mode: "folder", Path: cwd, Label: "current folder", Recommended: true},
+			{Mode: "zip", Path: filepath.Join(cwd, dr.SelectedSource), Label: dr.SelectedSource},
+		}}
+	}
+
+	if dr.NeedsInput {
+		var candidates []sourceCandidate
+		if fd.IsProject {
+			candidates = append(candidates, sourceCandidate{Mode: "folder", Path: cwd, Label: "current folder", Recommended: true})
+		}
+		for _, a := range dr.Archives {
+			if a.Error != "" || a.Classification == "release_asset" {
+				continue
+			}
+			candidates = append(candidates, sourceCandidate{Mode: "zip", Path: filepath.Join(cwd, a.Name), Label: a.Name})
+		}
+		if len(candidates) > 1 {
+			return sourceSelection{Folder: &fd, Discovery: &dr}, &sourceAmbiguityError{Candidates: candidates}
+		}
+		return sourceSelection{Discovery: &dr, Folder: &fd}, fmt.Errorf("multiple source candidates found; run `gitmake discover --json` or choose one explicitly with `gitmake Project.zip` or `gitmake .`")
+	}
+
 	if fd.IsProject && (fd.Confidence == "high" || dr.SelectedSource == "") {
 		return sourceSelection{Mode: "folder", Path: cwd, Folder: &fd, Discovery: &dr}, nil
 	}
@@ -84,9 +135,6 @@ func inferSource(cwd string) (sourceSelection, error) {
 	}
 	if fd.IsProject {
 		return sourceSelection{Mode: "folder", Path: cwd, Folder: &fd, Discovery: &dr}, nil
-	}
-	if dr.NeedsInput {
-		return sourceSelection{Discovery: &dr, Folder: &fd}, fmt.Errorf("multiple source candidates found; run `gitmake discover --json` or choose one explicitly with `gitmake Project.zip` or `gitmake .`")
 	}
 	return sourceSelection{Discovery: &dr, Folder: &fd}, fmt.Errorf("no project source found; run GitMake inside a project folder or provide a .zip file")
 }

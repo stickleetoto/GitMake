@@ -1,50 +1,60 @@
-GitMake v0.8.0 - QUICK START
-============================
+GitMake v0.10.0 - QUICK START
+=============================
 
 WINDOWS
-1. Extract GitMake_v0.8.0_Windows_x64.zip.
+1. Extract GitMake_v0.10.0_Windows_x64.zip.
 2. Double-click GitMake-Setup.exe.
-3. Open a new PowerShell window.
-4. Run: gitmake doctor
-5. If Claude Code is installed, Setup connects read-only MCP automatically.
+3. Setup checks Git, GitHub CLI/login, and optional Claude MCP readiness.
+4. Open a new PowerShell window.
+5. Run: gitmake --version
 
-LINUX / macOS
-1. Extract the package for your platform.
-2. Run: ./gitmake install
-3. Open a new shell if PATH was updated.
-4. Run: gitmake doctor
+EVERYDAY USE
+Folder project:
+  cd MyProject
+  gitmake
 
-PROJECT — FOLDER MODE
-1. Open a terminal in the live project folder.
-2. Run: gitmake .
-   (GitMake can also auto-detect a normal project folder with just: gitmake)
-3. Folder mode honors common .gitignore rules + optional .gitmakeignore.
+ZIP project:
+  gitmake Project.zip
 
-PROJECT — ZIP MODE
-1. Put the project source ZIP in a staging folder.
-2. Run: gitmake Project.zip
+GitMake is zero-config by default. Missing gitmake.json stays in memory.
+After a successful folder publish, .gitmake/project.json remembers the target repo.
 
-REVIEW FIRST
-1. gitmake --dry-run --read-only --json
-2. gitmake plan --json
-3. Review source_mode/source_path/changes/risk before apply.
+CONFIRMATION
+low risk:
+  Publish? [Y/n]
 
-SAFER AI FLOW
-1. gitmake plan --json
-2. Review the plan.
-3. For local human CLI apply: gitmake apply <plan_id>
-4. For MCP/AI apply, the human runs: gitmake approve <plan_id>
-5. Give the one-shot token only to the reviewed apply call.
+medium risk:
+  Type PUBLISH to continue
+
+high/destructive risk:
+  Type DELETE-XXXXXX to confirm
+
+--yes is accepted only for low-risk Simple Mode plans.
+
+TRUST / RECOVERY
+- `Why` explains supported automatic decisions.
+- Successful Simple Mode publishes end with a compact result card.
+- Blocked operations include Recommended recovery steps.
+- Use --verbose for detailed pipeline logs.
+
+If folder + ZIP both look like real project sources, GitMake asks instead of guessing.
+
+ADVANCED CONFIG (optional)
+  gitmake init .
+  gitmake init Project.zip
+
+EXPERT COMMANDS
+  gitmake help --expert
 
 AI / MCP
 Claude Code one-click:
   gitmake ai setup
 
+Guarded write tools:
+  gitmake ai setup --write
+
 Generic MCP descriptor:
   gitmake ai setup --client generic --json
-
-Status:
-  gitmake ai status
 
 SECURITY DEFAULTS
 - managed sync preserves remote-only files
