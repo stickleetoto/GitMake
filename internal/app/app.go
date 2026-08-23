@@ -16,13 +16,14 @@ import (
 	"gitmake/internal/github"
 	"gitmake/internal/gitops"
 	"gitmake/internal/installer"
+	"gitmake/internal/oplock"
 	"gitmake/internal/projectid"
 	"gitmake/internal/runner"
 	"gitmake/internal/syncer"
 	"gitmake/internal/upgrader"
 )
 
-const Version = "0.10.0"
+const Version = "1.0.0"
 
 type Options struct {
 	Command       string
@@ -69,6 +70,8 @@ func Main(args []string) int {
 		}
 		return 0
 	}
+
+	runHousekeeping()
 
 	// AI/config/discovery subcommands own their JSON schema because agents consume
 	// these files directly as capability/installation metadata.
@@ -197,7 +200,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.BoolVar(&o.Stdin, "stdin", false, "read config JSON or patch JSON from standard input")
 	fs.BoolVar(&o.MCPAllowWrite, "allow-write", false, "expose mutating tools in MCP mode")
 	fs.BoolVar(&o.AIWrite, "write", false, "configure an AI client with reviewed GitMake write tools")
-	fs.StringVar(&o.ApprovalToken, "approval", "", "one-shot approval token for MCP plan apply")
+	fs.StringVar(&o.ApprovalToken, "approval", "", "deprecated pre-1.0 approval token for MCP plan apply")
 	fs.BoolVar(&o.Destructive, "destructive", false, "explicitly approve a plan classified as destructive")
 	fs.BoolVar(&o.ExpertHelp, "expert", false, "show expert/low-level commands with gitmake help")
 	fs.StringVar(&o.AIClient, "client", "claude", "AI client for setup/status/remove: claude or generic")
@@ -237,11 +240,18 @@ func parseArgs(args []string) (Options, error) {
 		if len(rest) == 1 {
 			o.SourceArg = rest[0]
 		}
-	case "apply", "approve":
+	case "apply":
 		if len(rest) != 1 {
-			return Options{}, fmt.Errorf("usage: gitmake %s <plan_id>", o.Command)
+			return Options{}, fmt.Errorf("usage: gitmake apply <plan_id>")
 		}
 		o.PlanID = rest[0]
+	case "approve":
+		if len(rest) > 1 {
+			return Options{}, fmt.Errorf("usage: gitmake approve [plan_id]")
+		}
+		if len(rest) == 1 {
+			o.PlanID = rest[0]
+		}
 	case "init":
 		if len(rest) > 1 {
 			return Options{}, fmt.Errorf("usage: gitmake init [project-folder|project.zip]")
@@ -387,7 +397,7 @@ Project/config commands:
   gitmake discover            Classify project/release ZIPs without changing files
   gitmake plan [source]       Create an immutable reviewed publish plan
   gitmake apply <plan_id>     Revalidate and apply a previously reviewed plan
-  gitmake approve <plan_id>   Create a one-shot MCP approval token
+  gitmake approve [plan_id]   Approve the latest reviewed plan locally (no token copy)
   gitmake inspect             Inspect project/config/security state without mutation
   gitmake history             Show recent GitMake publish/apply operations
   gitmake config schema       Print the machine-readable config schema
@@ -414,8 +424,8 @@ Common options:
   --yes           Accept a safe low-risk publish/setup without prompting
   --json          Emit machine-readable JSON
   --read-only     Block mutations; combine with --dry-run for safe AI previews
-  --allow-write   In MCP mode, expose config write/patch and approved plan apply tools
-  --write         With gitmake ai setup, enable config writes + approved plan apply
+  --allow-write   In MCP mode, expose config write/patch and locally approved plan apply tools
+  --write         With gitmake ai setup, enable config writes + locally approved plan apply
   --client NAME   AI setup client: claude or generic
   --destructive   Required for applying/approving plans with mass deletions
   --version       Print GitMake version
@@ -424,7 +434,7 @@ Safety:
   GitMake never force-pushes, rewrites history, or deletes repositories.
   Managed sync preserves remote-only files and protected paths by default.
   Secret/large-file/LFS/branch/tag preflight runs before mutation.
-  MCP apply requires a one-shot human approval token.
+  MCP apply requires a local one-shot human approval; no token copy is required.
   Destructive plans require a separate explicit --destructive human approval.
   Folder mode honors common .gitignore rules + .gitmakeignore and excludes local Git/cache metadata.
   Existing repository configs are never auto-retargeted to a different lone ZIP.
@@ -892,6 +902,15 @@ func runPublish(o Options) error {
 		return fmt.Errorf("repository %s does not exist (--update-only)", target)
 	}
 
+	var repoLock *oplock.Lock
+	if !o.DryRun {
+		repoLock, err = oplock.Acquire("repo:" + strings.ToLower(target))
+		if err != nil {
+			return err
+		}
+		defer repoLock.Release()
+	}
+
 	release, err := prepareReleasePlan(configPath, target, exists, cfg, o.NoRelease, git, gh)
 	if err != nil {
 		return err
@@ -1206,7 +1225,7 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 		o.State.Risk = risk
 	}
 	if risk.Destructive && !o.DryRun && !o.Destructive {
-		return fmt.Errorf("destructive change blocked: %d of %d previously managed files would be deleted (%.1f%%); create a plan, review it, then use `gitmake apply <plan_id> --destructive` or `gitmake approve <plan_id> --destructive` for MCP", risk.Deleted, risk.ManagedBaseline, risk.DeletionRatio*100)
+		return fmt.Errorf("destructive change blocked: %d of %d previously managed files would be deleted (%.1f%%); create a plan, review it, then use `gitmake apply <plan_id> --destructive` or `gitmake approve --destructive` for MCP", risk.Deleted, risk.ManagedBaseline, risk.DeletionRatio*100)
 	}
 	if o.DryRun {
 		fmt.Printf("✓ Repository plan       UPDATE · +%d ~%d -%d\n", added, modified, deleted)

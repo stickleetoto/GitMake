@@ -1,3 +1,15 @@
+## v1.0.0 — Stable / Tokenless Approval
+
+- Removed approval-token copy/paste from the normal MCP workflow. `gitmake approve` stores a local short-lived single-use grant bound to the exact reviewed plan; `gitmake_apply` needs only the plan ID.
+- `gitmake approve` with no ID selects the newest reviewed plan for the current project directory.
+- Added plan-level and repository-level mutation locks.
+- Added apply operation journaling and interrupted-run revalidation.
+- Added cache housekeeping for expired approvals, stale locks, old plans, and operation journals.
+- Added an official Linux arm64 build for Raspberry Pi 4/5 and other ARM64 Linux systems.
+- Added a folder-hashing performance benchmark and kept optimization measurement-driven.
+- Froze the v1 CLI/config/plan/MCP/safety compatibility surface in `STABILITY.md`.
+- Legacy pre-1.0 approval tokens remain accepted as an optional compatibility path.
+
 ## v0.10.0 — Guided UX + Trust & Recovery
 
 - Added risk-adaptive Simple Mode confirmation: low risk uses `[Y/n]`, medium risk requires exact `PUBLISH`, and high/destructive plans require a plan-specific `DELETE-XXXXXX` phrase.

@@ -11,7 +11,7 @@ func TestSecretPathAndContentBlock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("TOKEN=abc"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "code.txt"), []byte("github_" + "pat_" + "abcdefghijklmnopqrstuvwxyz123456"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "code.txt"), []byte("github_"+"pat_"+"abcdefghijklmnopqrstuvwxyz123456"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r, err := Scan(root, Options{SecretScan: true, WarnFileBytes: 50, MaxGitFileBytes: 100})
@@ -25,7 +25,7 @@ func TestSecretPathAndContentBlock(t *testing.T) {
 
 func TestAllowSecretPath(t *testing.T) {
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "fixtures.pem"), []byte("-----BEGIN " + "PRIVATE KEY-----\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "fixtures.pem"), []byte("-----BEGIN "+"PRIVATE KEY-----\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	r, err := Scan(root, Options{SecretScan: true, AllowSecretPaths: []string{"fixtures.pem"}, WarnFileBytes: 1024, MaxGitFileBytes: 2048})
@@ -57,7 +57,6 @@ func TestLargeFileMarkedLFSIsNotBlocking(t *testing.T) {
 	}
 }
 
-
 func TestScannerTestFixturesDoNotContainLiteralSecretSignatures(t *testing.T) {
 	data, err := os.ReadFile("scan_test.go")
 	if err != nil {
@@ -69,7 +68,6 @@ func TestScannerTestFixturesDoNotContainLiteralSecretSignatures(t *testing.T) {
 		}
 	}
 }
-
 
 func TestRepositorySourceTreeDoesNotSelfTriggerSecretScan(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", ".."))

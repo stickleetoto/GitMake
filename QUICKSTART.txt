@@ -1,65 +1,32 @@
-GitMake v0.10.0 - QUICK START
-=============================
+GitMake v1.0.0 - QUICK START
 
-WINDOWS
-1. Extract GitMake_v0.10.0_Windows_x64.zip.
-2. Double-click GitMake-Setup.exe.
-3. Setup checks Git, GitHub CLI/login, and optional Claude MCP readiness.
-4. Open a new PowerShell window.
-5. Run: gitmake --version
+INSTALL
+1. Extract GitMake_v1.0.0_Windows_x64.zip.
+2. Run GitMake-Setup.exe.
+3. GitMake checks Git, GitHub CLI/login, and optionally connects Claude Code MCP.
 
-EVERYDAY USE
-Folder project:
+EVERYDAY CLI
   cd MyProject
   gitmake
 
-ZIP project:
+ZIP INPUT
   gitmake Project.zip
 
-GitMake is zero-config by default. Missing gitmake.json stays in memory.
-After a successful folder publish, .gitmake/project.json remembers the target repo.
+CLAUDE / MCP
+  gitmake ai setup --write
+  Ask Claude: "이 프로젝트 GitHub에 올려줘"
+  Review the plan.
+  In your terminal run:
+    gitmake approve
+  Return to Claude and say approval is complete.
+  Claude calls gitmake_apply with the plan ID. No approval token copy/paste is needed.
 
-CONFIRMATION
-low risk:
-  Publish? [Y/n]
+DESTRUCTIVE PLAN
+  gitmake approve --destructive
+  Then type the DELETE-XXXXXX confirmation shown by GitMake.
 
-medium risk:
-  Type PUBLISH to continue
-
-high/destructive risk:
-  Type DELETE-XXXXXX to confirm
-
---yes is accepted only for low-risk Simple Mode plans.
-
-TRUST / RECOVERY
-- `Why` explains supported automatic decisions.
-- Successful Simple Mode publishes end with a compact result card.
-- Blocked operations include Recommended recovery steps.
-- Use --verbose for detailed pipeline logs.
-
-If folder + ZIP both look like real project sources, GitMake asks instead of guessing.
-
-ADVANCED CONFIG (optional)
-  gitmake init .
-  gitmake init Project.zip
+UPGRADE
+  gitmake upgrade
 
 EXPERT COMMANDS
   gitmake help --expert
-
-AI / MCP
-Claude Code one-click:
-  gitmake ai setup
-
-Guarded write tools:
-  gitmake ai setup --write
-
-Generic MCP descriptor:
-  gitmake ai setup --client generic --json
-
-SECURITY DEFAULTS
-- managed sync preserves remote-only files
-- .github/** and .gitmake/** protected
-- likely secrets block publish
-- large direct-Git files block unless safely handled by LFS
-- required-PR protected branches are not bypassed
-- no force push / repo delete / history rewrite

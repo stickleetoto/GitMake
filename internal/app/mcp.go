@@ -169,7 +169,7 @@ func (s *mcpServer) tools() []mcpTool {
 		tools = append(tools,
 			mcpTool{Name: "gitmake_config_write", Description: "Validate and atomically write gitmake.json. Prefer this over direct file editing.", InputSchema: objectSchema([]string{"config"}, map[string]any{"project_dir": projectDir, "config": configObj})},
 			mcpTool{Name: "gitmake_config_patch", Description: "Validate and atomically patch an existing gitmake.json.", InputSchema: objectSchema([]string{"patch"}, map[string]any{"project_dir": projectDir, "patch": patchObj})},
-			mcpTool{Name: "gitmake_apply", Description: "Apply a reviewed plan using a user-created one-shot approval token. Revalidates source/config/remote state and consumes the token only after success.", InputSchema: objectSchema([]string{"plan_id", "approval_token"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
+			mcpTool{Name: "gitmake_apply", Description: "Apply one reviewed plan after the human has approved it locally with `gitmake approve`. No approval token needs to be copied into the AI. GitMake revalidates the exact plan binding and consumes the local grant only after success. A legacy approval_token is accepted only for pre-1.0 compatibility.", InputSchema: objectSchema([]string{"plan_id"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "description": "Deprecated pre-1.0 compatibility token.", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
 		)
 	}
 	return tools
@@ -294,31 +294,45 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		token, err := stringArg(args, "approval_token", true)
-		if err != nil {
-			return nil, err
-		}
-		record, err := approval.ValidateRecord(planID, token)
-		if err != nil {
-			return nil, fmt.Errorf("one-shot approval rejected: %w", err)
-		}
 		plan, _, err := planstore.Load(planID)
 		if err != nil {
 			return nil, err
 		}
-		if plan.Risk.Destructive && !record.Destructive {
-			return nil, fmt.Errorf("one-shot approval rejected: plan %s is destructive and requires a human-created `gitmake approve %s --destructive` token", planID, planID)
+		legacyToken, err := stringArg(args, "approval_token", false)
+		if err != nil {
+			return nil, err
+		}
+		var destructive bool
+		if legacyToken != "" {
+			record, legacyErr := approval.ValidateRecord(planID, legacyToken)
+			if legacyErr != nil {
+				return nil, fmt.Errorf("human approval rejected: %w", legacyErr)
+			}
+			destructive = record.Destructive
+		} else {
+			record, grantErr := approval.ValidateGrant(planID, approvalBindingFromPlan(plan))
+			if grantErr != nil {
+				return nil, fmt.Errorf("human approval required: %w", grantErr)
+			}
+			destructive = record.Destructive
+		}
+		if plan.Risk.Destructive && !destructive {
+			return nil, fmt.Errorf("human approval rejected: plan %s is destructive and requires `gitmake approve --destructive` in a terminal", planID)
 		}
 		cli := []string{"apply", planID, "--json"}
-		if record.Destructive {
+		if destructive {
 			cli = append(cli, "--destructive")
 		}
 		result, err := invokeGitMakeJSON(projectDir, nil, cli...)
 		if err != nil {
 			return result, err
 		}
-		if err := approval.Consume(planID, token); err != nil {
-			return result, fmt.Errorf("apply succeeded but approval token could not be consumed: %w", err)
+		if legacyToken != "" {
+			if err := approval.Consume(planID, legacyToken); err != nil {
+				return result, fmt.Errorf("apply succeeded but legacy approval could not be consumed: %w", err)
+			}
+		} else if err := approval.ConsumeGrant(planID, approvalBindingFromPlan(plan)); err != nil {
+			return result, fmt.Errorf("apply succeeded but local approval could not be consumed: %w", err)
 		}
 		return result, nil
 	default:
@@ -420,7 +434,7 @@ func (s *mcpServer) prepareProject(projectDir, sourcePath string, persistConfig 
 			"validated":      true,
 		},
 		"plan":        planResult,
-		"next_action": "Show the reviewed plan provenance, changes, and risk to the user. Do not apply until the user explicitly approves it. For MCP apply, the human must mint a one-shot token with `gitmake approve <plan_id>`.",
+		"next_action": "Show the reviewed plan provenance, changes, and risk to the user. Do not apply until the user explicitly approves it. Ask the human to run `gitmake approve`; GitMake stores a local one-shot grant, so no token needs to be copied into the AI.",
 	}
 	if candidate != nil {
 		result["inferred_config"] = candidate

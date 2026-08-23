@@ -61,19 +61,19 @@ func TestMCPAllowWriteAddsGatedTools(t *testing.T) {
 	}
 }
 
-func TestMCPApplyRequiresOneShotApprovalToken(t *testing.T) {
+func TestMCPApplyUsesTokenlessLocalApproval(t *testing.T) {
 	s := &mcpServer{allowWrite: true}
 	for _, tool := range s.tools() {
 		if tool.Name != "gitmake_apply" {
 			continue
 		}
 		req, _ := tool.InputSchema["required"].([]string)
-		seen := map[string]bool{}
-		for _, v := range req {
-			seen[v] = true
+		if len(req) != 1 || req[0] != "plan_id" {
+			t.Fatalf("gitmake_apply must require only plan_id in v1 tokenless flow: %#v", req)
 		}
-		if !seen["plan_id"] || !seen["approval_token"] {
-			t.Fatalf("gitmake_apply must require plan_id + approval_token: %#v", req)
+		b, _ := json.Marshal(tool)
+		if !bytes.Contains(b, []byte("No approval token")) {
+			t.Fatalf("apply tool should explain tokenless approval: %s", b)
 		}
 		return
 	}

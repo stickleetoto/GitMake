@@ -1,58 +1,23 @@
-# GitMake v0.10.0 — Guided UX + Trust & Recovery
+# GitMake v1.0.0 — Stable
 
-v0.10.0 is the second half of the UX pass started in v0.9. It does not broaden GitMake into a general GitHub client. Instead it makes the existing zero-config folder/ZIP publishing flow easier to trust, easier to confirm, and easier to recover when GitMake intentionally blocks.
+GitMake v1.0.0 freezes the public interface after the 0.x development line.
 
-## 1. Risk-adaptive confirmation
+The final pre-1.0 change is **tokenless human approval**: after an AI creates a reviewed plan, the user runs `gitmake approve`. GitMake stores a short-lived local single-use grant bound to the exact plan; there is no `gma_...` token to copy back into Claude or another MCP client. The AI can then call `gitmake_apply` with the plan ID only.
 
-Simple Mode now changes confirmation friction according to the reviewed plan:
+## Final v1 hardening
 
-```text
-low       → Publish? [Y/n]
-medium    → Type PUBLISH to continue
-high      → Type DELETE-XXXXXX to confirm
-```
+- Tokenless local approval grants, bound to plan fingerprint, source hash, config hash, and target repository.
+- `gitmake approve` with no plan ID automatically selects the newest reviewed plan for the current project directory.
+- Low-risk approval is `[Y/n]`; medium risk requires `PUBLISH`; destructive risk requires a plan-specific `DELETE-XXXXXX` phrase plus `--destructive`.
+- Plan-level and repository-level mutation locks prevent overlapping publishes/applies.
+- Apply operation journal records interrupted runs and forces full plan revalidation before a retry.
+- Expired approval/plan/lock/journal cache housekeeping.
+- Linux arm64 release build for Raspberry Pi 4/5 and other ARM64 Linux systems.
+- Folder hashing benchmark added as a performance-regression guard; no speculative optimization was introduced.
+- Pre-1.0 token-based MCP approval remains accepted as an optional compatibility path, but is deprecated.
 
-`--yes` is deliberately limited to low-risk plans and cannot bypass medium/high-risk confirmation. Destructive plans still retain the existing expert and one-shot human approval controls.
+## v1 stable surface
 
-## 2. Explain automatic decisions
+The v1 stability contract covers the everyday CLI, config schema v1, plan schema v1, project identity, managed-sync semantics, MCP tool names, exit-code classes, and core safety invariants. See `STABILITY.md`.
 
-Reviewed plans now carry `decision_notes`, shown to humans as a compact `Why` section. GitMake only explains facts that were actually used by the resolved pipeline: zero-config inference, project-memory restoration, folder/ZIP source selection evidence, private zero-config default, preserved remote visibility, and verified/first-adoption project identity.
-
-## 3. Compact success result
-
-Normal Simple Mode hides low-level pipeline chatter after success and shows the result that matters:
-
-```text
-✓ Published GambleLM
-
-Repository  testuser/GambleLM
-Branch      main
-Changes     +2 ~4 -0
-Release     none
-Time        5.8s
-
-https://github.com/testuser/GambleLM
-```
-
-Use `--verbose` when the pipeline details are useful.
-
-## 4. Guided error recovery
-
-Friendly errors now include a stable code when available plus a `Recommended` section with the safest next action. GitMake can guide source disambiguation, GitHub login, Git LFS setup, exclusion of files that should never be published, and rebuilding stale plans. It intentionally does not auto-override project-identity mismatches or destructive safety gates.
-
-## 5. First-run readiness UX
-
-`GitMake-Setup.exe` now checks the full path from installation to first publish:
-
-- GitMake CLI + user PATH
-- Git
-- GitHub CLI
-- GitHub login
-- optional Claude Code
-- optional read-only GitMake MCP connection
-
-When publishing prerequisites are ready, Setup finishes with a simple next action: open a project folder and run `gitmake`, or ask Claude to publish the project when MCP is connected.
-
-## Compatibility and safety
-
-The v0.9 zero-config contract remains intact. Folder and ZIP mode, project memory, source ambiguity handling, reviewed plans, managed sync, protected paths, secret/large-file/LFS preflight, branch protection checks, project identity, stale-plan revalidation, one-shot MCP approvals, and no-force-push/no-history-rewrite/no-repo-delete invariants are preserved.
+GitMake remains intentionally narrow: project folder/ZIP → reviewed plan → human approval → safe GitHub repository/release publish.

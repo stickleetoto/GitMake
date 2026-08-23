@@ -75,7 +75,7 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 	case strings.Contains(lower, "approval token") || strings.Contains(lower, "one-shot approval"):
 		out.Code = "APPROVAL_REQUIRED"
 		out.Recoverable = true
-		out.SuggestedAction = "Run `gitmake approve <plan_id>` and provide the one-shot token to the MCP apply tool."
+		out.SuggestedAction = "Run `gitmake approve` in the reviewed project directory. GitMake stores a short-lived local single-use grant; no token copy is required."
 	case strings.Contains(lower, "multiple source candidates") || strings.Contains(lower, "multiple zip"):
 		out.Code = "SOURCE_AMBIGUOUS"
 		out.Recoverable = true
@@ -182,7 +182,7 @@ func planFromState(id, cwd string, s *PipelineState) (planstore.Plan, error) {
 	}
 	p.ReviewNotes = []string{
 		"Verify working_directory, config_path, source_mode, source_path, and repository before approval.",
-		"A destructive plan requires a separate --destructive human approval and cannot use a normal approval token.",
+		"A destructive plan requires a separate --destructive human approval and cannot use a normal approval grant.",
 	}
 	p.DecisionNotes = decisionNotesFromState(s)
 	if s.Release != nil {

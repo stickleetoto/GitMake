@@ -10,6 +10,7 @@
     "README.md",
     "RELEASE_NOTES.md",
     "RUN_GITMAKE.bat",
+    "STABILITY.md",
     "TEST_REPORT.md",
     "build.bat",
     "build.ps1",
@@ -27,6 +28,7 @@
     "internal/app/configcmd.go",
     "internal/app/configcmd_test.go",
     "internal/app/hardening.go",
+    "internal/app/housekeeping.go",
     "internal/app/init_wizard.go",
     "internal/app/machine.go",
     "internal/app/mcp.go",
@@ -64,6 +66,10 @@
     "internal/installer/install_windows.go",
     "internal/installer/status.go",
     "internal/installer/status_test.go",
+    "internal/opjournal/journal.go",
+    "internal/opjournal/journal_test.go",
+    "internal/oplock/lock.go",
+    "internal/oplock/lock_test.go",
     "internal/pathmatch/match.go",
     "internal/planstore/planstore.go",
     "internal/projectid/projectid.go",
@@ -90,6 +96,7 @@
     "scripts/e2e_v072.sh",
     "scripts/e2e_v073.sh",
     "scripts/e2e_v080.sh",
-    "scripts/e2e_v090.sh"
+    "scripts/e2e_v090.sh",
+    "scripts/e2e_v100.sh"
   ]
 }

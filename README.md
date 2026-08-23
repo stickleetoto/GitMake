@@ -1,4 +1,4 @@
-# GitMake v0.10.0
+# GitMake v1.0.0
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,9 @@ commit + normal push
 optional Release + assets
 ```
 
-v0.10.0 adds **Guided UX + Trust & Recovery** on top of the v0.9 zero-config/simple-mode foundation. GitMake now adapts confirmation friction to reviewed risk, explains the automatic decisions behind a plan, collapses successful publishes into a compact result card, gives actionable recovery guidance when it blocks, and turns the Windows installer into a readiness/setup experience. `gitmake.json` remains optional advanced configuration.
+v1.0.0 is the stable release of GitMake: a narrow, AI-friendly publishing workflow for project folders or ZIP snapshots. It keeps the zero-config/simple UX, reviewed plan safety gates, MCP integration, managed sync, secret/large-file preflight, and guided recovery from the 0.x line. The final v1 change removes approval-token copy/paste: run `gitmake approve` locally, then the AI can apply the exact reviewed plan once. `gitmake.json` remains optional advanced configuration.
+
+For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
 ## Install
 
@@ -62,7 +64,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 0.10.0
+GitMake 1.0.0
 
 testuser/GambleLM
 Update · public
@@ -264,10 +266,10 @@ If at least 10 previously managed files and at least 30% of the managed baseline
 ```text
 gitmake apply <plan_id> --destructive
 # or, for MCP:
-gitmake approve <plan_id> --destructive
+gitmake approve --destructive
 ```
 
-The destructive approval token is still short-lived, plan-bound, single-use, and cannot be minted through MCP.
+The destructive approval remains short-lived, plan-bound, single-use, and cannot be created through MCP.
 
 ## Security preflight
 
@@ -385,21 +387,27 @@ If source/config/remote/release state changed since review, apply fails with `PL
 
 ## One-shot approval for AI/MCP apply
 
-MCP write access is no longer enough by itself to publish a reviewed plan. A human must create a short-lived, plan-bound token from an interactive terminal:
+MCP write access is no longer enough by itself to publish a reviewed plan. A human creates a short-lived local approval grant from an interactive terminal:
+
+```text
+gitmake approve
+```
+
+With no plan ID, GitMake selects the newest reviewed plan for the current project directory and shows its repository, change counts, and risk before confirmation. An explicit plan ID is still supported:
 
 ```text
 gitmake approve gm_0123456789abcdef
 ```
 
-The token:
+The local approval grant:
 
-- cannot be minted through MCP
-- is bound to one plan
-- expires
-- is consumed after successful apply
-- rejects replay
+- cannot be created through MCP
+- is bound to the exact reviewed plan fingerprint, source/config hashes, and repository
+- expires after 10 minutes
+- is consumed only after a successful apply
+- rejects replay or a changed plan
 
-The agent sends both `plan_id` and `approval_token` to `gitmake_apply`. If the plan is destructive, a normal token is rejected; only a human-created `--destructive` token can authorize it.
+The agent sends only `plan_id` to `gitmake_apply`; there is no approval token to copy/paste. Destructive plans require the human to run `gitmake approve --destructive` and enter the plan-specific `DELETE-XXXXXX` confirmation. Pre-1.0 approval tokens remain accepted only as a deprecated compatibility path.
 
 ## AI discovery
 
@@ -408,7 +416,7 @@ gitmake ai describe --json
 gitmake ai install
 ```
 
-The manifest tells agents to use GitMake's authoritative config schema/write tools, run security-aware preview/plan first, stop on ambiguity/security/branch/tag errors, and never manufacture approval tokens.
+The manifest tells agents to use GitMake's authoritative config schema/write tools, run security-aware preview/plan first, stop on ambiguity/security/branch/tag errors, and never manufacture or bypass human approvals.
 
 ## Claude Code one-click MCP
 
@@ -425,7 +433,7 @@ To expose guarded config write/patch and approved-plan apply:
 gitmake ai setup --write
 ```
 
-Actual apply still requires the one-shot human approval token above.
+Actual apply still requires the local one-shot human approval above; no token copy/paste is needed.
 
 ## Generic MCP clients
 
@@ -521,7 +529,7 @@ gitmake doctor                  Diagnose environment/install state
 gitmake inspect                 Inspect project/config state
 gitmake discover                Classify ZIP candidates
 gitmake plan [source]           Store reviewed plan
-gitmake approve <plan_id>       Human-mint one-shot MCP approval
+gitmake approve                 Approve latest reviewed plan locally for one MCP apply
 gitmake apply <plan_id>         Revalidate + locally apply plan
 gitmake history                 Read audit history
 
@@ -555,7 +563,7 @@ gitmake mcp --allow-write
 - ambiguous folder/ZIP source candidates are not guessed
 - agent-authored config is schema/semantic validated
 - reviewed plans reject stale inputs/remote state
-- MCP apply requires a human-minted one-shot approval token
+- MCP apply requires a local human one-shot approval (`gitmake approve`); no token copy/paste
 - self-upgrade verifies SHA-256
 
 ## Why GitMake exists

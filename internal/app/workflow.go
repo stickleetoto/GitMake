@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gitmake/internal/history"
+	"gitmake/internal/opjournal"
+	"gitmake/internal/oplock"
 	"gitmake/internal/planstore"
 )
 
@@ -98,21 +100,34 @@ func runPlan(o Options) error {
 	}
 	if p.Risk.Destructive {
 		fmt.Printf("\nThis plan is destructive. Local CLI apply requires:\n  gitmake apply %s --destructive\n", p.ID)
-		fmt.Printf("For AI/MCP, only a human can mint the destructive token:\n  gitmake approve %s --destructive\n", p.ID)
+		fmt.Println("For AI/MCP, only a human can create the destructive local approval:\n  gitmake approve --destructive")
 	} else {
 		fmt.Printf("\nReview complete. Local CLI apply:\n  gitmake apply %s\n", p.ID)
-		fmt.Printf("For AI/MCP, create a one-shot approval token first:\n  gitmake approve %s\n", p.ID)
+		fmt.Println("For AI/MCP, approve this reviewed plan locally first:\n  gitmake approve")
 	}
 	return nil
 }
 
-func runApply(o Options) error {
+func runApply(o Options) (runErr error) {
 	p, _, err := planstore.Load(o.PlanID)
 	if err != nil {
 		return err
 	}
+	lock, err := oplock.Acquire("plan:" + p.ID)
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	interrupted, journalErr := opjournal.Begin(p.ID, p.Repository)
+	if journalErr != nil {
+		return fmt.Errorf("start operation journal: %w", journalErr)
+	}
+	defer func() { _ = opjournal.Finish(p.ID, runErr) }()
+	if interrupted && !o.JSON {
+		fmt.Println("· Recovery              previous apply was interrupted; full plan revalidation is running")
+	}
 	if p.Risk.Destructive && !o.Destructive {
-		return fmt.Errorf("destructive plan blocked: %d of %d managed files would be deleted (%.1f%%); explicit human approval requires `gitmake apply %s --destructive` or a destructive MCP approval token", p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100, p.ID)
+		return fmt.Errorf("destructive plan blocked: %d of %d managed files would be deleted (%.1f%%); explicit human approval requires `gitmake apply %s --destructive` or `gitmake approve --destructive` for MCP", p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100, p.ID)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {

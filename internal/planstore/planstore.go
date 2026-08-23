@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -137,4 +138,84 @@ func Load(id string) (Plan, string, error) {
 		return Plan{}, path, fmt.Errorf("plan id mismatch: expected %s, found %s", id, p.ID)
 	}
 	return p, path, nil
+}
+
+// LatestForDirectory returns the newest reviewed plan created for dir.
+// It is used by `gitmake approve` so users do not have to copy plan IDs.
+func LatestForDirectory(dir string) (Plan, string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return Plan{}, "", err
+	}
+	root, err := directory()
+	if err != nil {
+		return Plan{}, "", err
+	}
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return Plan{}, "", fmt.Errorf("no reviewed plans found; create one with `gitmake` or `gitmake plan`")
+	}
+	if err != nil {
+		return Plan{}, "", err
+	}
+	var best Plan
+	var bestPath string
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(root, e.Name())
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		var p Plan
+		if json.Unmarshal(data, &p) != nil || p.Schema != Schema || p.ID == "" {
+			continue
+		}
+		pwd, absErr := filepath.Abs(p.WorkingDirectory)
+		if absErr != nil || !samePath(abs, pwd) {
+			continue
+		}
+		if best.ID == "" || p.CreatedAt.After(best.CreatedAt) {
+			best, bestPath = p, path
+		}
+	}
+	if best.ID == "" {
+		return Plan{}, "", fmt.Errorf("no reviewed plan found for %s; create one with `gitmake` or `gitmake plan`", abs)
+	}
+	return best, bestPath, nil
+}
+
+func samePath(a, b string) bool {
+	if filepath.Separator == '\\' {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// Cleanup removes old plan records while leaving recent reviewed plans intact.
+func Cleanup(maxAge time.Duration) error {
+	root, err := directory()
+	if err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().UTC().Add(-maxAge)
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(root, e.Name()))
+		}
+	}
+	return nil
 }

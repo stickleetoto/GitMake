@@ -1,52 +1,30 @@
-GitMake v0.10.0 + AI/MCP
-=======================
+GitMake v1.0.0 + AI/MCP
 
-CLAUDE CODE (recommended one-click path)
-
+ONE-CLICK CLAUDE SETUP
   gitmake ai setup
 
-This:
-  - detects Claude Code
-  - ensures a stable GitMake executable path
-  - registers the user-scoped stdio MCP server
-  - defaults to read-only tools
-  - checks connection status
-
-To expose guarded config-write + approved-plan apply tools:
-
+Enable reviewed write/apply tools:
   gitmake ai setup --write
 
-Actual MCP apply still requires a one-shot human approval token:
+Status:
+  gitmake ai status
 
-  gitmake plan --json
-  gitmake approve <plan_id>
+NORMAL AI WORKFLOW
+1. Ask Claude to publish or prepare the current project folder/ZIP.
+2. Claude should prefer the high-level `gitmake_prepare` MCP tool.
+3. Claude shows the reviewed plan, provenance, changes, and risk.
+4. Human runs:
+     gitmake approve
+5. Human tells Claude approval is complete.
+6. Claude calls `gitmake_apply` with only the reviewed plan ID.
 
-The approval command requires an interactive terminal. MCP does not expose a tool that can create its own approval token.
+There is no approval token to copy/paste in the v1 flow.
+The local approval grant is short-lived, single-use, and bound to the exact reviewed plan.
 
-GENERIC MCP CLIENTS
+Destructive plan:
+  gitmake approve --destructive
 
+Read-only MCP remains the default. GitMake never exposes a tool that can create its own human approval grant.
+
+Generic MCP descriptor:
   gitmake ai setup --client generic --json
-
-GitMake returns a machine-readable stdio descriptor containing the executable path and MCP arguments. It does not edit an unknown client's config automatically.
-
-RAW SERVER
-
-Read-only:
-  gitmake mcp
-
-Guarded write surface:
-  gitmake mcp --allow-write
-
-GitMake's MCP surface intentionally covers project inspection, discovery, schema/config handling, preview, plan, history, and approved apply. It does not expose force push, repository deletion, history rewrite, or an unreviewed direct-publish tool.
-
-HIGH-LEVEL PREPARE (v0.10.0)
-
-For folder, ZIP, or unconfigured projects, prefer the MCP tool:
-
-  gitmake_prepare
-
-It infers folder-or-ZIP source mode -> builds a safe snapshot -> config inference/validation -> security/preflight -> identity/risk -> reviewed plan in one call.
-
-In default read-only mode, missing gitmake.json stays in memory. Do NOT use Claude Write/Edit to create gitmake.json when gitmake_prepare or gitmake_config_write is available.
-
-GitMake is zero-config by default even with write-enabled MCP. `gitmake_prepare` keeps missing config in memory unless `persist_config: true` is explicitly requested. It always stops before apply.

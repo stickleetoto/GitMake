@@ -1,6 +1,7 @@
 package foldersource
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -105,5 +106,24 @@ func TestDetectProject(t *testing.T) {
 	}
 	if !d.IsProject || d.Score < 5 {
 		t.Fatalf("detection=%+v", d)
+	}
+}
+
+func BenchmarkHashThousandSmallFiles(b *testing.B) {
+	root := b.TempDir()
+	for i := 0; i < 1000; i++ {
+		name := filepath.Join(root, "src", fmt.Sprintf("file_%04d.txt", i))
+		if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+			b.Fatal(err)
+		}
+		if err := os.WriteFile(name, []byte("gitmake benchmark payload\n"), 0o644); err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Hash(root); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

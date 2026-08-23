@@ -234,7 +234,7 @@ func confirmAIWriteAccess() (bool, error) {
 	fmt.Println("AI write access allows:")
 	fmt.Println("  • create/update gitmake.json")
 	fmt.Println("  • submit reviewed GitMake plans for apply")
-	fmt.Println("  • GitHub apply still requires a user-created one-shot approval token")
+	fmt.Println("  • GitHub apply still requires a local one-shot human approval with `gitmake approve`")
 	fmt.Println()
 	fmt.Print("Enable write access? [y/N]: ")
 	line, err := bufio.NewReader(os.Stdin).ReadString('\n')

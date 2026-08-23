@@ -15,59 +15,100 @@ import (
 	"gitmake/internal/securityscan"
 )
 
+func approvalBindingFromPlan(p planstore.Plan) approval.Binding {
+	return approval.Binding{
+		Fingerprint:  p.Fingerprint,
+		SourceSHA256: p.SourceSHA256,
+		ConfigSHA256: p.ConfigSHA256,
+		Repository:   p.Repository,
+	}
+}
+
 func runApprove(o Options) error {
-	p, _, err := planstore.Load(o.PlanID)
+	var p planstore.Plan
+	var err error
+	if strings.TrimSpace(o.PlanID) == "" {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return cwdErr
+		}
+		p, _, err = planstore.LatestForDirectory(cwd)
+	} else {
+		p, _, err = planstore.Load(o.PlanID)
+	}
 	if err != nil {
 		return err
 	}
+	o.PlanID = p.ID
 	if p.Risk.Destructive && !o.Destructive {
-		return fmt.Errorf("plan %s is classified as destructive: %d of %d managed files would be deleted (%.1f%%); review provenance and run `gitmake approve %s --destructive` yourself if this is intentional", p.ID, p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100, p.ID)
+		return fmt.Errorf("plan %s is classified as destructive: %d of %d managed files would be deleted (%.1f%%); review provenance and run `gitmake approve --destructive` yourself if this is intentional", p.ID, p.Risk.Deleted, p.Risk.ManagedBaseline, p.Risk.DeletionRatio*100)
 	}
 	st, err := os.Stdin.Stat()
 	if err != nil {
 		return err
 	}
 	if st.Mode()&os.ModeCharDevice == 0 {
-		return fmt.Errorf("human approval requires an interactive terminal; run `gitmake approve %s` yourself", o.PlanID)
+		return fmt.Errorf("human approval requires an interactive terminal; run `gitmake approve` yourself")
 	}
-	confirm := o.PlanID
-	if len(confirm) > 6 {
-		confirm = confirm[len(confirm)-6:]
+
+	fmt.Fprintf(os.Stderr, "GitMake Approval · %s\n\n", Version)
+	fmt.Fprintf(os.Stderr, "Plan        %s\n", p.ID)
+	fmt.Fprintf(os.Stderr, "Repository  %s\n", p.Repository)
+	fmt.Fprintf(os.Stderr, "Changes     +%d ~%d -%d\n", p.Changes.Added, p.Changes.Modified, p.Changes.Deleted)
+	level := strings.ToLower(strings.TrimSpace(p.Risk.Level))
+	if level == "" {
+		level = "low"
 	}
-	if p.Risk.Destructive {
-		confirm = "DESTRUCTIVE-" + confirm
-		fmt.Fprintf(os.Stderr, "DESTRUCTIVE approval for plan %s (%d deletions, %.1f%% of managed baseline).\n", o.PlanID, p.Risk.Deleted, p.Risk.DeletionRatio*100)
+	fmt.Fprintf(os.Stderr, "Risk        %s\n", level)
+
+	confirmed := false
+	reader := bufio.NewReader(os.Stdin)
+	if p.Risk.Destructive || level == "high" {
+		code := "DELETE-" + confirmationCode(p.ID)
+		fmt.Fprintf(os.Stderr, "\nDestructive approval. Type %s to confirm: ", code)
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && strings.TrimSpace(line) == "" {
+			return readErr
+		}
+		confirmed = strings.TrimSpace(line) == code
+	} else if level == "medium" {
+		fmt.Fprint(os.Stderr, "\nType PUBLISH to approve this reviewed plan: ")
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && strings.TrimSpace(line) == "" {
+			return readErr
+		}
+		confirmed = strings.EqualFold(strings.TrimSpace(line), "PUBLISH")
 	} else {
-		fmt.Fprintf(os.Stderr, "Approve one MCP apply for plan %s?\n", o.PlanID)
+		fmt.Fprint(os.Stderr, "\nApprove this reviewed plan? [Y/n]: ")
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && strings.TrimSpace(line) == "" {
+			return readErr
+		}
+		v := strings.ToLower(strings.TrimSpace(line))
+		confirmed = v == "" || v == "y" || v == "yes"
 	}
-	fmt.Fprintf(os.Stderr, "Type %s to confirm: ", confirm)
-	line, readErr := bufio.NewReader(os.Stdin).ReadString('\n')
-	if readErr != nil && strings.TrimSpace(line) == "" {
-		return readErr
-	}
-	if strings.TrimSpace(line) != confirm {
+	if !confirmed {
 		return fmt.Errorf("approval cancelled")
 	}
-	token, expires, err := approval.Create(o.PlanID, p.Risk.Destructive)
+
+	record, err := approval.CreateGrant(p.ID, approvalBindingFromPlan(p), p.Risk.Destructive)
 	if err != nil {
-		return fmt.Errorf("create approval token: %w", err)
+		return fmt.Errorf("create approval grant: %w", err)
 	}
 	if o.JSON {
 		return emitJSON(map[string]any{
-			"schema": "gitmake.approval/v1", "ok": true, "plan_id": o.PlanID,
-			"approval_token": token, "expires_at": expires,
+			"schema": approval.Schema, "ok": true, "plan_id": p.ID,
+			"approved": true, "expires_at": record.ExpiresAt,
 			"single_use": true, "destructive": p.Risk.Destructive,
+			"tokenless": true,
 		})
 	}
-	fmt.Printf("GitMake Approval · %s\n\n", Version)
-	fmt.Printf("✓ Plan                 %s\n", o.PlanID)
-	fmt.Printf("✓ One-shot token       %s\n", token)
-	fmt.Printf("· Expires              %s\n", expires.Local().Format("2006-01-02 15:04:05"))
+	fmt.Printf("\n✓ Approved             %s\n", p.ID)
+	fmt.Printf("· Expires              %s\n", record.ExpiresAt.Local().Format("2006-01-02 15:04:05"))
 	if p.Risk.Destructive {
 		fmt.Println("! Approval class       DESTRUCTIVE")
 	}
-	fmt.Println("\nGive this token only to the AI/tool that should apply this reviewed plan.")
-	fmt.Println("It becomes unusable after one successful MCP apply.")
+	fmt.Println("\nNo token to copy. Return to the AI; GitMake MCP can now apply this plan once.")
 	return nil
 }
 
