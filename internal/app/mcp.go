@@ -47,8 +47,11 @@ type mcpTool struct {
 }
 
 type mcpToolCallParams struct {
-	Name      string         `json:"name"`
-	Arguments map[string]any `json:"arguments"`
+	Name           string                      `json:"name"`
+	Arguments      map[string]any              `json:"arguments"`
+	InputResponses map[string]mcpInputResponse `json:"inputResponses,omitempty"`
+	RequestState   string                      `json:"requestState,omitempty"`
+	Meta           map[string]any              `json:"_meta,omitempty"`
 }
 
 func runMCP(o Options) error {
@@ -58,7 +61,11 @@ func runMCP(o Options) error {
 }
 
 type mcpServer struct {
-	allowWrite bool
+	allowWrite        bool
+	legacyProtocol    string
+	legacyElicitation bool
+	nextServerRequest uint64
+	stateSecret       []byte
 }
 
 func (s *mcpServer) serve(in io.Reader, out io.Writer) error {
@@ -79,6 +86,26 @@ func (s *mcpServer) serve(in io.Reader, out io.Writer) error {
 		}
 		// Notifications have no id and receive no response.
 		isNotification := req.ID == nil
+
+		// Legacy (2025-11-25) stdio clients support elicitation as a
+		// server-to-client request while the original tool call is pending.
+		// Handle that flow here because it temporarily owns the input stream.
+		if !isNotification && req.Method == "tools/call" && s.legacyElicitation {
+			var p mcpToolCallParams
+			if json.Unmarshal(req.Params, &p) == nil {
+				if _, ok := s.legacyShouldElicit(p); ok {
+					resp, err := s.legacyApplyWithElicitation(req, p, scanner, enc)
+					if err != nil {
+						return err
+					}
+					if err := enc.Encode(resp); err != nil {
+						return fmt.Errorf("write MCP response: %w", err)
+					}
+					continue
+				}
+			}
+		}
+
 		resp, respond := s.handle(req)
 		if !respond || isNotification {
 			continue
@@ -97,28 +124,51 @@ func (s *mcpServer) handle(req mcpRequest) (mcpResponse, bool) {
 	base := mcpResponse{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
-		// Legacy MCP compatibility. Modern 2026 clients can call tools/list directly.
+		// Legacy MCP compatibility. Claude Code currently supports form
+		// elicitation on stdio, so remember that client capability for the
+		// lifetime of this legacy session. Modern 2026 clients declare it
+		// independently on every request instead.
 		var p struct {
-			ProtocolVersion string `json:"protocolVersion"`
+			ProtocolVersion string         `json:"protocolVersion"`
+			Capabilities    map[string]any `json:"capabilities"`
 		}
 		_ = json.Unmarshal(req.Params, &p)
 		protocol := p.ProtocolVersion
 		if protocol == "" {
 			protocol = mcpProtocolLegacy
 		}
+		s.legacyProtocol = protocol
+		_, s.legacyElicitation = p.Capabilities["elicitation"]
 		base.Result = map[string]any{
 			"protocolVersion": protocol,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "gitmake", "version": Version},
+			"instructions":    "Use gitmake_prepare for normal publish planning. When gitmake_apply needs human approval, GitMake can request it through MCP elicitation in clients that support it; otherwise the fallback is `gitmake approve` in a terminal.",
+		}
+		return base, true
+	case "server/discover":
+		base.Result = map[string]any{
+			"resultType":        "complete",
+			"supportedVersions": []string{mcpProtocolModern, mcpProtocolLegacy},
+			"capabilities":      map[string]any{"tools": map[string]any{"listChanged": false}},
+			"serverInfo":        map[string]any{"name": "gitmake", "version": Version},
+			"instructions":      "Use gitmake_prepare as the primary entry point. gitmake_apply uses client-controlled MCP elicitation for human approval when supported, with terminal approval as a fallback.",
 		}
 		return base, true
 	case "notifications/initialized", "notifications/cancelled":
 		return base, false
 	case "ping":
 		base.Result = map[string]any{}
+		if s.isModernRequest(req.Params) {
+			base.Result.(map[string]any)["resultType"] = "complete"
+		}
 		return base, true
 	case "tools/list":
-		base.Result = map[string]any{"tools": s.tools()}
+		result := map[string]any{"tools": s.tools()}
+		if s.isModernRequest(req.Params) {
+			result["resultType"] = "complete"
+		}
+		base.Result = result
 		return base, true
 	case "tools/call":
 		var p mcpToolCallParams
@@ -126,20 +176,29 @@ func (s *mcpServer) handle(req mcpRequest) (mcpResponse, bool) {
 			base.Error = &mcpError{Code: -32602, Message: "Invalid params", Data: err.Error()}
 			return base, true
 		}
+		modern := s.isModernRequest(req.Params)
+		if modern && p.Name == "gitmake_apply" && (s.requestSupportsElicitation(req.Params) || len(p.InputResponses) > 0) {
+			result, inputRequired, handled, err := s.modernApplyResult(p)
+			if handled {
+				if err != nil {
+					resp := s.toolErrorResponse(base, err, true)
+					return resp, true
+				}
+				if inputRequired != nil {
+					base.Result = inputRequired
+					return base, true
+				}
+				resp := s.toolSuccessResponse(base, result, true)
+				return resp, true
+			}
+		}
 		result, err := s.callTool(p.Name, p.Arguments)
 		if err != nil {
-			base.Result = map[string]any{
-				"content": []map[string]any{{"type": "text", "text": mustJSONString(map[string]any{"ok": false, "error": err.Error()})}},
-				"isError": true,
-			}
-			return base, true
+			resp := s.toolErrorResponse(base, err, modern)
+			return resp, true
 		}
-		base.Result = map[string]any{
-			"content":           []map[string]any{{"type": "text", "text": mustJSONString(result)}},
-			"structuredContent": result,
-			"isError":           false,
-		}
-		return base, true
+		resp := s.toolSuccessResponse(base, result, modern)
+		return resp, true
 	default:
 		base.Error = &mcpError{Code: -32601, Message: "Method not found", Data: req.Method}
 		return base, true
@@ -169,7 +228,7 @@ func (s *mcpServer) tools() []mcpTool {
 		tools = append(tools,
 			mcpTool{Name: "gitmake_config_write", Description: "Validate and atomically write gitmake.json. Prefer this over direct file editing.", InputSchema: objectSchema([]string{"config"}, map[string]any{"project_dir": projectDir, "config": configObj})},
 			mcpTool{Name: "gitmake_config_patch", Description: "Validate and atomically patch an existing gitmake.json.", InputSchema: objectSchema([]string{"patch"}, map[string]any{"project_dir": projectDir, "patch": patchObj})},
-			mcpTool{Name: "gitmake_apply", Description: "Apply one reviewed plan after the human has approved it locally with `gitmake approve`. No approval token needs to be copied into the AI. GitMake revalidates the exact plan binding and consumes the local grant only after success. A legacy approval_token is accepted only for pre-1.0 compatibility.", InputSchema: objectSchema([]string{"plan_id"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "description": "Deprecated pre-1.0 compatibility token.", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
+			mcpTool{Name: "gitmake_apply", Description: "Apply one reviewed plan. If the connected MCP client supports elicitation, GitMake requests human approval inside the client UI and only proceeds after the client returns an accepted human response. Otherwise the stable fallback is local `gitmake approve`. GitMake revalidates the exact plan binding and keeps approval single-use. A legacy approval_token is accepted only for pre-1.0 compatibility.", InputSchema: objectSchema([]string{"plan_id"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "description": "Deprecated pre-1.0 compatibility token.", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
 		)
 	}
 	return tools
@@ -434,7 +493,7 @@ func (s *mcpServer) prepareProject(projectDir, sourcePath string, persistConfig 
 			"validated":      true,
 		},
 		"plan":        planResult,
-		"next_action": "Show the reviewed plan provenance, changes, and risk to the user. Do not apply until the user explicitly approves it. Ask the human to run `gitmake approve`; GitMake stores a local one-shot grant, so no token needs to be copied into the AI.",
+		"next_action": "Show the reviewed plan provenance, changes, and risk to the user. If the user asked to publish, call gitmake_apply: on clients with MCP elicitation support GitMake will open a client-controlled human approval dialog before any mutation. Never answer that dialog on the user's behalf. If elicitation is unavailable, fall back to asking the human to run `gitmake approve`.",
 	}
 	if candidate != nil {
 		result["inferred_config"] = candidate

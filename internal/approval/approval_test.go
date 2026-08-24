@@ -37,6 +37,7 @@ func TestDestructiveApprovalRecord(t *testing.T) {
 }
 
 func TestTokenlessGrantBindingAndConsume(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	planID := "gm_tokenless_test"
 	binding := Binding{Fingerprint: "fp", SourceSHA256: "src", ConfigSHA256: "cfg", Repository: "owner/repo"}
 	r, err := CreateGrant(planID, binding, false)
@@ -74,5 +75,20 @@ func TestCleanupKeepsFreshUnusedGrant(t *testing.T) {
 	}
 	if _, err := ValidateGrant(planID, binding); err != nil {
 		t.Fatalf("fresh grant was removed: %v", err)
+	}
+}
+
+func TestConsumedGrantCannotBeRemintedForSamePlan(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	planID := "gm_no_replay"
+	binding := Binding{Fingerprint: "fp", SourceSHA256: "src", ConfigSHA256: "cfg", Repository: "owner/repo"}
+	if _, err := CreateGrant(planID, binding, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := ConsumeGrant(planID, binding); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CreateGrant(planID, binding, false); err == nil {
+		t.Fatal("consumed approval must not be re-minted for the same reviewed plan")
 	}
 }

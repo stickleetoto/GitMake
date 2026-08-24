@@ -51,6 +51,26 @@ func CreateGrant(planID string, binding Binding, destructive bool) (Record, erro
 	if strings.TrimSpace(binding.Fingerprint) == "" || strings.TrimSpace(binding.SourceSHA256) == "" || strings.TrimSpace(binding.Repository) == "" {
 		return Record{}, fmt.Errorf("approval binding is incomplete")
 	}
+
+	// Creating the same grant is idempotent while it is still unused. Once a
+	// reviewed plan has successfully consumed its grant, that exact plan cannot
+	// be re-approved through a replayed MCP elicitation. A fresh reviewed plan is
+	// required for another mutation.
+	if existing, err := load(planID); err == nil && existing.Schema == Schema {
+		if !sameBinding(existing.Binding, binding) {
+			return Record{}, fmt.Errorf("existing approval for plan %s is bound to different reviewed content", planID)
+		}
+		if existing.Used {
+			return Record{}, fmt.Errorf("approval for plan %s was already used; create a fresh reviewed plan", planID)
+		}
+		if time.Now().UTC().Before(existing.ExpiresAt) {
+			if destructive && !existing.Destructive {
+				return Record{}, fmt.Errorf("existing approval for plan %s is not destructive; create a fresh reviewed plan", planID)
+			}
+			return existing, nil
+		}
+	}
+
 	now := time.Now().UTC()
 	r := Record{
 		Schema: Schema, PlanID: planID, CreatedAt: now, ExpiresAt: now.Add(ttl),

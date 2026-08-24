@@ -1,4 +1,4 @@
-# GitMake v1.0.0
+# GitMake v1.1.0
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,7 @@ commit + normal push
 optional Release + assets
 ```
 
-v1.0.0 is the stable release of GitMake: a narrow, AI-friendly publishing workflow for project folders or ZIP snapshots. It keeps the zero-config/simple UX, reviewed plan safety gates, MCP integration, managed sync, secret/large-file preflight, and guided recovery from the 0.x line. The final v1 change removes approval-token copy/paste: run `gitmake approve` locally, then the AI can apply the exact reviewed plan once. `gitmake.json` remains optional advanced configuration.
+v1.1.0 keeps the frozen v1 publishing surface and adds **MCP Chat Approval** as a backward-compatible approval transport. On clients that support MCP elicitation—such as Claude Code—`gitmake_apply` can request approval inside the client UI. Terminal `gitmake approve` remains the stable fallback. The exact reviewed plan binding, single-use semantics, destructive confirmation, and all v1 safety invariants remain unchanged.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -64,7 +64,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.0.0
+GitMake 1.1.0
 
 testuser/GambleLM
 Update · public
@@ -385,29 +385,59 @@ gitmake apply gm_0123456789abcdef --json
 
 If source/config/remote/release state changed since review, apply fails with `PLAN_STALE` rather than publishing a different state.
 
-## One-shot approval for AI/MCP apply
+## Human approval for AI/MCP apply
 
-MCP write access is no longer enough by itself to publish a reviewed plan. A human creates a short-lived local approval grant from an interactive terminal:
+MCP write access is never enough by itself to publish a reviewed plan. GitMake requires a human approval bound to the exact reviewed plan.
+
+### Chat approval (preferred when supported)
+
+On MCP clients with **elicitation** support, `gitmake_apply` asks the human inside the client UI before any GitHub mutation. Claude Code supports MCP elicitation dialogs.
+
+Normal flow:
+
+```text
+AI: gitmake_prepare
+    ↓
+reviewed plan shown to user
+    ↓
+AI: gitmake_apply(plan_id)
+    ↓
+GitMake → client-controlled approval dialog
+    ↓
+human Accept / Decline
+    ↓
+GitMake revalidates exact plan
+    ↓
+publish
+```
+
+Low-risk plans can be accepted directly in the dialog. Medium-risk plans require `PUBLISH`. High-risk/destructive plans require the plan-specific `DELETE-XXXXXX` phrase. The model must never answer the elicitation on the user's behalf.
+
+The client response creates the same short-lived, single-use local grant used by terminal approval. A consumed grant cannot be re-minted for the same reviewed plan; another mutation requires a fresh plan.
+
+### Terminal fallback
+
+Clients without elicitation support keep the stable v1 flow:
 
 ```text
 gitmake approve
 ```
 
-With no plan ID, GitMake selects the newest reviewed plan for the current project directory and shows its repository, change counts, and risk before confirmation. An explicit plan ID is still supported:
+An explicit plan ID is still supported:
 
 ```text
 gitmake approve gm_0123456789abcdef
 ```
 
-The local approval grant:
+Destructive fallback approval requires:
 
-- cannot be created through MCP
-- is bound to the exact reviewed plan fingerprint, source/config hashes, and repository
-- expires after 10 minutes
-- is consumed only after a successful apply
-- rejects replay or a changed plan
+```text
+gitmake approve --destructive
+```
 
-The agent sends only `plan_id` to `gitmake_apply`; there is no approval token to copy/paste. Destructive plans require the human to run `gitmake approve --destructive` and enter the plan-specific `DELETE-XXXXXX` confirmation. Pre-1.0 approval tokens remain accepted only as a deprecated compatibility path.
+Approval is bound to the plan fingerprint, source/config hashes, and target repository; expires after 10 minutes; and is consumed only after successful apply. Pre-1.0 approval tokens remain accepted only as a deprecated compatibility path.
+
+**Trust note:** MCP chat approval relies on the connected client to surface elicitation to the human. If a client is configured with hooks that auto-answer elicitation, that automation becomes part of the trust boundary. Do not auto-approve GitMake elicitation when manual approval is required.
 
 ## AI discovery
 
@@ -433,7 +463,7 @@ To expose guarded config write/patch and approved-plan apply:
 gitmake ai setup --write
 ```
 
-Actual apply still requires the local one-shot human approval above; no token copy/paste is needed.
+With Claude Code or another elicitation-capable client, `gitmake_apply` can request the approval directly in the client UI. If elicitation is unavailable, use the terminal `gitmake approve` fallback. No approval token copy/paste is needed.
 
 ## Generic MCP clients
 
@@ -452,7 +482,7 @@ gitmake mcp
 gitmake mcp --allow-write
 ```
 
-Read-only MCP tools include project inspection, describe, doctor, discovery, config schema/validation/suggestion, preview, plan, and history. Guarded write mode adds config write/patch and approved apply. There is no MCP force-push, repo-delete, history-rewrite, approval-minting, or unreviewed direct-publish tool.
+Read-only MCP tools include project inspection, describe, doctor, discovery, config schema/validation/suggestion, preview, plan, and history. Guarded write mode adds config write/patch and reviewed apply. `gitmake_apply` can use client-controlled elicitation for human approval when supported, with terminal approval as fallback. There is no MCP force-push, repo-delete, history-rewrite, or unreviewed direct-publish tool.
 
 Project-root resolution supports an explicit tool `project_dir`, `GITMAKE_PROJECT_DIR`, Claude's `CLAUDE_PROJECT_DIR`, then current working directory.
 

@@ -1,6 +1,6 @@
 # GitMake v1 Stability Contract
 
-GitMake v1.0.0 freezes the public publishing interface after the 0.x development line.
+GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 adds MCP chat approval as an optional, backward-compatible approval transport.
 
 ## Stable through v1.x
 
@@ -18,9 +18,9 @@ GitMake v1.x will preserve these interfaces unless a security issue makes a brea
 
 ## Approval semantics
 
-`gitmake approve` creates a short-lived local, single-use approval grant bound to the exact reviewed plan fingerprint, source hash, config hash (when persisted), and target repository. The user does not copy an approval token into the AI.
+`gitmake approve` continues to create a short-lived local, single-use approval grant bound to the exact reviewed plan fingerprint, source hash, config hash (when persisted), and target repository. v1.1 may create the same class of grant from a **client-controlled MCP elicitation response** when the connected client supports elicitation. This does not change the required `plan_id` input of `gitmake_apply`.
 
-Normal approvals expire after 10 minutes and are consumed only after a successful MCP apply. Destructive plans require `gitmake approve --destructive` and the stronger deletion confirmation phrase.
+Normal approvals expire after 10 minutes and are consumed only after a successful MCP apply. Chat approval requires explicit client acceptance; medium/destructive risk still requires stronger typed confirmation. Destructive terminal fallback remains `gitmake approve --destructive`.
 
 ## Compatible evolution
 

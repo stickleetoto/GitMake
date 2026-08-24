@@ -1,4 +1,4 @@
-GitMake v1.0.0 + AI/MCP
+GitMake v1.1.0 + AI/MCP
 
 ONE-CLICK CLAUDE SETUP
   gitmake ai setup
@@ -28,3 +28,9 @@ Read-only MCP remains the default. GitMake never exposes a tool that can create 
 
 Generic MCP descriptor:
   gitmake ai setup --client generic --json
+
+
+GitMake v1.1 Chat Approval
+- With write MCP enabled, gitmake_apply can request human approval inside Claude Code through MCP elicitation.
+- If the client cannot elicit, run: gitmake approve
+- Never configure an auto-approval elicitation hook if you require manual GitMake approval.

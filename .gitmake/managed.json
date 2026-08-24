@@ -4,6 +4,7 @@
     ".gitignore",
     "CHANGELOG.md",
     "CLAUDE_MCP_SETUP.txt",
+    "GITMAKE_FOR_LLM.md",
     "INSTALL_GITMAKE.bat",
     "LICENSE",
     "QUICKSTART.txt",
@@ -32,6 +33,7 @@
     "internal/app/init_wizard.go",
     "internal/app/machine.go",
     "internal/app/mcp.go",
+    "internal/app/mcp_elicitation.go",
     "internal/app/mcp_test.go",
     "internal/app/project_memory.go",
     "internal/app/release.go",
@@ -97,6 +99,7 @@
     "scripts/e2e_v073.sh",
     "scripts/e2e_v080.sh",
     "scripts/e2e_v090.sh",
-    "scripts/e2e_v100.sh"
+    "scripts/e2e_v100.sh",
+    "scripts/e2e_v110.sh"
   ]
 }

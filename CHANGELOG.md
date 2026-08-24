@@ -1,3 +1,13 @@
+## v1.1.0 — MCP Chat Approval
+
+- Added human approval inside elicitation-capable MCP clients. `gitmake_apply` now requests a client-controlled form confirmation when no valid local approval grant exists.
+- Claude Code can surface the approval dialog directly during the tool call; terminal `gitmake approve` remains the compatibility fallback.
+- Added risk-adaptive chat confirmation: low risk uses the client Accept/Decline action, medium risk requires `PUBLISH`, and destructive/high risk requires the plan-specific `DELETE-XXXXXX` phrase.
+- Added MCP 2026-07-28 Multi Round-Trip Request support (`input_required` / `inputResponses`) plus `server/discover`, while preserving legacy 2025-11-25 stdio `elicitation/create` compatibility.
+- Added signed/expiring MRTR `requestState` binding to the reviewed plan fingerprint.
+- Hardened one-shot approval replay: a consumed grant cannot be re-minted for the same reviewed plan; another mutation requires a fresh plan.
+- Preserved all v1.0 CLI/config/plan/MCP tool names and the terminal approval fallback.
+
 ## v1.0.0 — Stable / Tokenless Approval
 
 - Removed approval-token copy/paste from the normal MCP workflow. `gitmake approve` stores a local short-lived single-use grant bound to the exact reviewed plan; `gitmake_apply` needs only the plan ID.

@@ -1,7 +1,7 @@
-GitMake v1.0.0 - QUICK START
+GitMake v1.1.0 - QUICK START
 
 INSTALL
-1. Extract GitMake_v1.0.0_Windows_x64.zip.
+1. Extract GitMake_v1.1.0_Windows_x64.zip.
 2. Run GitMake-Setup.exe.
 3. GitMake checks Git, GitHub CLI/login, and optionally connects Claude Code MCP.
 
@@ -30,3 +30,9 @@ UPGRADE
 
 EXPERT COMMANDS
   gitmake help --expert
+
+
+GitMake v1.1 Chat Approval
+- With write MCP enabled, gitmake_apply can request human approval inside Claude Code through MCP elicitation.
+- If the client cannot elicit, run: gitmake approve
+- Never configure an auto-approval elicitation hook if you require manual GitMake approval.

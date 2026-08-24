@@ -121,20 +121,23 @@ grep -q 'DESTRUCTIVE_CHANGE_BLOCKED' "$D/blocked_apply.json"
 if (cd "$D" && "$BIN" approve "$PID" --json >blocked_approve.json); then exit 34; fi
 grep -q 'DESTRUCTIVE_CHANGE_BLOCKED' "$D/blocked_approve.json"
 
-# A human TTY can mint a destructive-class one-shot token.
-TOKEN="$(python - "$BIN" "$D" "$PID" <<'PY'
+# A human TTY can create a destructive-class tokenless one-shot grant.
+python - "$BIN" "$D" "$PID" <<'PYAPPROVE'
 import os, pty, re, select, subprocess, sys
 bin,cwd,pid=sys.argv[1:]
 master,slave=pty.openpty()
 p=subprocess.Popen([bin,'approve',pid,'--destructive'],cwd=cwd,stdin=slave,stdout=slave,stderr=slave,env=os.environ.copy(),close_fds=True)
 os.close(slave)
-os.write(master, ('DESTRUCTIVE-'+pid[-6:]+'\n').encode())
-chunks=[]
+chunks=[]; sent=False
 while p.poll() is None:
     r,_,_=select.select([master],[],[],0.1)
     if r:
-        try: chunks.append(os.read(master,4096))
+        try: data=os.read(master,4096)
         except OSError: break
+        chunks.append(data); text=b''.join(chunks).decode(errors='replace')
+        m=re.search(r'Type (DELETE-[A-F0-9]{6}) to confirm:',text)
+        if m and not sent:
+            os.write(master,(m.group(1)+'\n').encode()); sent=True
 p.wait()
 try:
     while True: chunks.append(os.read(master,4096))
@@ -142,27 +145,25 @@ except OSError: pass
 os.close(master)
 out=b''.join(chunks).decode(errors='replace')
 if p.returncode: raise SystemExit(out)
-m=re.search(r'gma_[0-9a-f]+',out)
-if not m: raise SystemExit('token missing: '+out)
-print(m.group(0))
-PY
-)"
+assert sent,out
+assert 'No token to copy' in out,out
+PYAPPROVE
 
-# MCP apply accepts the destructive-class token once and only once.
-python - "$BIN" "$D" "$PID" "$TOKEN" <<'PY'
+# MCP apply consumes the destructive-class local grant once and only once.
+python - "$BIN" "$D" "$PID" <<'PYMCP'
 import json, os, subprocess, sys
-bin,cwd,pid,token=sys.argv[1:]
-def call(tok):
-    req={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gitmake_apply","arguments":{"project_dir":cwd,"plan_id":pid,"approval_token":tok}}}
+bin,cwd,pid=sys.argv[1:]
+def call():
+    req={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gitmake_apply","arguments":{"project_dir":cwd,"plan_id":pid}}}
     p=subprocess.run([bin,'mcp','--allow-write'],cwd=cwd,env=os.environ.copy(),input=json.dumps(req)+'\n',text=True,capture_output=True)
     if p.returncode: raise SystemExit(p.stderr)
     return json.loads(p.stdout)
-r=call(token)
+r=call()
 assert r['result']['isError'] is False, r
-r2=call(token)
+r2=call()
 assert r2['result']['isError'] is True, r2
 assert 'already used' in r2['result']['content'][0]['text'], r2
-PY
+PYMCP
 # Remote visibility remains public metadata; GitMake update never changes it.
 test "$(cat "$TMP/remotes/testuser/DestructiveGate.git.visibility")" = PUBLIC
 # Deleted file is actually gone after explicitly approved destructive apply.
