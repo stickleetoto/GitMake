@@ -1,6 +1,6 @@
 # GitMake v1 Stability Contract
 
-GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 added MCP chat approval as an optional, backward-compatible approval transport. v1.2.0 added `gitmake_publish` as a new high-level orchestration tool without changing the frozen lower-level interfaces. v1.2.1 hardens protocol routing and approval-state validation without changing those interfaces.
+GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 added MCP chat approval as an optional, backward-compatible approval transport. v1.2.0 added `gitmake_publish` as a new high-level orchestration tool without changing the frozen lower-level interfaces. v1.2.1 hardens protocol routing and approval-state validation without changing those interfaces. v1.2.2 moves self-upgrade discovery/download to anonymous public GitHub HTTPS, preserves checksum verification, and adds downgrade refusal without changing the publishing interfaces.
 
 ## Stable through v1.x
 

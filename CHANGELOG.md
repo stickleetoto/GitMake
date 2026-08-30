@@ -1,3 +1,24 @@
+## v1.2.2 — Authless Self-Upgrade
+
+### Fixed
+
+- `gitmake upgrade` no longer requires GitHub CLI authentication for public GitMake releases.
+- Self-upgrade now discovers the latest release through the public GitHub Releases API and downloads release assets over HTTPS.
+- Added strict GitHub/GitHubusercontent HTTPS host validation for updater asset URLs.
+- Added semantic version comparison so a newer local build is never downgraded to an older published release.
+- Improved no-op upgrade output to show both the current version and the latest published tag.
+
+### Safety
+
+- Existing SHA-256 verification remains mandatory before replacement is staged.
+- Publishing authentication and safety boundaries are unchanged; only the public self-updater was decoupled from `gh auth`.
+
+### Verification
+
+- Added anonymous public-release client tests.
+- Added downgrade-refusal coverage.
+- Existing v1.0/v1.1/v1.2/v1.2.1 regression suites remain green.
+
 ## v1.2.1 — Protocol Routing Hardening
 
 - Fixed modern MCP 2026-07-28 sessions being able to accidentally arm the legacy held-open `elicitation/create` path after `initialize`.

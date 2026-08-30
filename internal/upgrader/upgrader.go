@@ -9,22 +9,35 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
-
-	"gitmake/internal/github"
 )
 
 const releaseRepo = "stickleetoto/GitMake"
 
-func Upgrade(currentVersion string, gh github.Client) (string, bool, error) {
-	tag, err := gh.LatestReleaseTag(releaseRepo)
+type ReleaseClient interface {
+	LatestReleaseTag(target string) (string, error)
+	DownloadReleaseAsset(target, tag, asset, dir string) (string, error)
+}
+
+func Upgrade(currentVersion string, releases ReleaseClient) (string, bool, error) {
+	tag, err := releases.LatestReleaseTag(releaseRepo)
 	if err != nil {
 		return "", false, err
 	}
 	latest := strings.TrimPrefix(strings.TrimSpace(tag), "v")
-	if latest == currentVersion {
+	cmp, err := compareReleaseVersions(latest, currentVersion)
+	if err != nil {
+		return "", false, fmt.Errorf("compare GitMake versions: %w", err)
+	}
+	if cmp <= 0 {
 		return tag, false, nil
 	}
+	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
+		return tag, false, fmt.Errorf("gitmake upgrade self-replacement is currently supported on Windows x64 only")
+	}
+
 	tmp, err := os.MkdirTemp("", "gitmake-upgrade-*")
 	if err != nil {
 		return "", false, err
@@ -32,12 +45,12 @@ func Upgrade(currentVersion string, gh github.Client) (string, bool, error) {
 	// Do not remove the temp directory immediately: the Windows replacement
 	// helper needs the extracted executable after this process exits.
 	asset := fmt.Sprintf("GitMake_v%s_Windows_x64.zip", latest)
-	zipPath, err := gh.DownloadReleaseAsset(releaseRepo, tag, asset, tmp)
+	zipPath, err := releases.DownloadReleaseAsset(releaseRepo, tag, asset, tmp)
 	if err != nil {
 		return "", false, err
 	}
 	checksumAsset := fmt.Sprintf("GitMake_v%s_SHA256.txt", latest)
-	checksumPath, err := gh.DownloadReleaseAsset(releaseRepo, tag, checksumAsset, tmp)
+	checksumPath, err := releases.DownloadReleaseAsset(releaseRepo, tag, checksumAsset, tmp)
 	if err != nil {
 		return "", false, fmt.Errorf("download upgrade checksum: %w", err)
 	}
@@ -52,6 +65,46 @@ func Upgrade(currentVersion string, gh github.Client) (string, bool, error) {
 		return "", false, err
 	}
 	return tag, true, nil
+}
+
+func compareReleaseVersions(a, b string) (int, error) {
+	av, err := parseReleaseVersion(a)
+	if err != nil {
+		return 0, fmt.Errorf("latest version %q: %w", a, err)
+	}
+	bv, err := parseReleaseVersion(b)
+	if err != nil {
+		return 0, fmt.Errorf("current version %q: %w", b, err)
+	}
+	for i := range av {
+		if av[i] < bv[i] {
+			return -1, nil
+		}
+		if av[i] > bv[i] {
+			return 1, nil
+		}
+	}
+	return 0, nil
+}
+
+func parseReleaseVersion(v string) ([3]int, error) {
+	var out [3]int
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return out, fmt.Errorf("expected stable semantic version MAJOR.MINOR.PATCH")
+	}
+	for i, part := range parts {
+		if part == "" {
+			return out, fmt.Errorf("empty version component")
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 0 {
+			return out, fmt.Errorf("invalid numeric component %q", part)
+		}
+		out[i] = n
+	}
+	return out, nil
 }
 
 func verifyChecksumFile(checksumPath, filePath, assetName string) error {
@@ -126,19 +179,23 @@ func extractExecutable(zipPath, dst string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		defer rc.Close()
 		out := filepath.Join(dst, "gitmake-new.exe")
 		w, err := os.Create(out)
 		if err != nil {
+			rc.Close()
 			return "", err
 		}
 		_, copyErr := io.Copy(w, rc)
-		closeErr := w.Close()
+		closeReadErr := rc.Close()
+		closeWriteErr := w.Close()
 		if copyErr != nil {
 			return "", copyErr
 		}
-		if closeErr != nil {
-			return "", closeErr
+		if closeReadErr != nil {
+			return "", closeReadErr
+		}
+		if closeWriteErr != nil {
+			return "", closeWriteErr
 		}
 		return out, nil
 	}

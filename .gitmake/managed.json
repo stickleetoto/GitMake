@@ -81,6 +81,8 @@
     "internal/securityscan/scan_test.go",
     "internal/syncer/sync.go",
     "internal/syncer/sync_test.go",
+    "internal/upgrader/public_release.go",
+    "internal/upgrader/public_release_test.go",
     "internal/upgrader/replace_other.go",
     "internal/upgrader/replace_windows.go",
     "internal/upgrader/upgrader.go",

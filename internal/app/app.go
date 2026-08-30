@@ -23,7 +23,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.1"
+const Version = "1.2.2"
 
 type Options struct {
 	Command       string
@@ -523,17 +523,16 @@ func runInstall() error {
 
 func runUpgrade(o Options) error {
 	fmt.Printf("GitMake %s · Upgrade\n\n", Version)
-	run := runner.Runner{Verbose: o.Verbose}
-	gh := github.Client{Run: run}
-	if err := gh.Preflight(); err != nil {
-		return err
+	if o.Verbose {
+		fmt.Println("$ public GitHub Release API")
 	}
-	tag, staged, err := upgrader.Upgrade(Version, gh)
+	releases := upgrader.NewPublicReleaseClient()
+	tag, staged, err := upgrader.Upgrade(Version, releases)
 	if err != nil {
 		return err
 	}
 	if !staged {
-		fmt.Printf("✓ Already up to date (%s)\n", tag)
+		fmt.Printf("✓ No upgrade needed (current %s, GitHub latest %s)\n", Version, tag)
 		return nil
 	}
 	fmt.Printf("✓ Downloaded %s\n", tag)

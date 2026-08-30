@@ -1,4 +1,4 @@
-# GitMake v1.2.1
+# GitMake v1.2.2
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -18,7 +18,7 @@ optional Release + assets
 
 v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow. In elicitation-capable MCP clients, the new `gitmake_publish` tool performs prepare → reviewed plan → human approval → exact-plan revalidation → apply → final result as one interactive MCP operation. Agents no longer need to stop the chat between `gitmake_prepare` and `gitmake_apply`. Existing `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, schemas, safety gates, and approval semantics remain backward compatible.
 
-v1.2.1 is a hardening patch for that orchestrator. It keeps modern MCP 2026-07-28 requests on the MRTR `input_required` path even when a client performs `initialize`, requires an exact purpose binding on signed approval state, and aligns the bundled LLM guidance with the one-shot publish workflow.
+v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardens self-upgrade: `gitmake upgrade` now checks public GitHub Releases directly over HTTPS instead of requiring `gh auth`, preserves SHA-256 verification, and refuses accidental downgrades when the local version is newer than the latest published release.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -66,7 +66,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.1
+GitMake 1.2.2
 
 testuser/GambleLM
 Update · public
@@ -530,7 +530,7 @@ Recent publish/apply audit records include success/failure, repository, mode, ch
 gitmake upgrade
 ```
 
-Release packages are checked against the matching SHA-256 asset before replacement is staged.
+Upgrade discovery and downloads use the public GitHub Release API over HTTPS and do not require GitHub CLI authentication. Release packages are checked against the matching SHA-256 asset before replacement is staged. GitMake also refuses to replace a newer local build with an older published release.
 
 ## Machine-readable errors
 
