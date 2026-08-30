@@ -78,7 +78,7 @@ after="$(cat "$D3/gitmake.json")"
 test "$before" = "$after"
 
 # 6. Version/help surface.
-"$BIN" --version | grep -q '1.0.0'
+"$BIN" --version | grep -Eq '^gitmake 1\.[0-9]+\.[0-9]+$'
 "$BIN" help | grep -q 'Everyday use'
 
 echo V04_E2E_PASS

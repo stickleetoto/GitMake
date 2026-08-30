@@ -1,4 +1,4 @@
-# GitMake v1.1.0
+# GitMake v1.2.1
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -16,7 +16,9 @@ commit + normal push
 optional Release + assets
 ```
 
-v1.1.0 keeps the frozen v1 publishing surface and adds **MCP Chat Approval** as a backward-compatible approval transport. On clients that support MCP elicitation—such as Claude Code—`gitmake_apply` can request approval inside the client UI. Terminal `gitmake approve` remains the stable fallback. The exact reviewed plan binding, single-use semantics, destructive confirmation, and all v1 safety invariants remain unchanged.
+v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow. In elicitation-capable MCP clients, the new `gitmake_publish` tool performs prepare → reviewed plan → human approval → exact-plan revalidation → apply → final result as one interactive MCP operation. Agents no longer need to stop the chat between `gitmake_prepare` and `gitmake_apply`. Existing `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, schemas, safety gates, and approval semantics remain backward compatible.
+
+v1.2.1 is a hardening patch for that orchestrator. It keeps modern MCP 2026-07-28 requests on the MRTR `input_required` path even when a client performs `initialize`, requires an exact purpose binding on signed approval state, and aligns the bundled LLM guidance with the one-shot publish workflow.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -64,7 +66,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.1.0
+GitMake 1.2.1
 
 testuser/GambleLM
 Update · public
@@ -201,7 +203,19 @@ Exactly one of `source.folder` or `source.zip` may be configured.
 
 ## One-call AI preparation
 
-When GitMake MCP is available, agents should prefer the high-level `gitmake_prepare` tool for folder, ZIP, or unconfigured projects. It performs:
+When GitMake MCP write access is available, agents should prefer **`gitmake_publish`** for normal requests such as “upload this”, “publish this project”, “create a GitHub repo”, or “update this repo”. `gitmake_publish` owns the full interactive flow in one tool operation:
+
+```text
+source/config inference
+→ security + GitHub preflight
+→ reviewed plan
+→ client-controlled human approval
+→ exact-plan revalidation
+→ apply
+→ final repository/release result
+```
+
+Use `gitmake_prepare` when the user explicitly asks for plan-only review. `gitmake_prepare` performs:
 
 ```text
 source discovery
@@ -212,9 +226,9 @@ source discovery
 → stop for human approval
 ```
 
-A missing `gitmake.json` stays in memory by default **even when MCP write access is enabled**. Persistence is explicit (`persist_config: true`) and goes through GitMake's validated atomic config writer. `gitmake_prepare` still never publishes; it stops at a reviewed plan.
+A missing `gitmake.json` stays in memory by default **even when MCP write access is enabled**. Persistence is explicit (`persist_config: true`) and goes through GitMake's validated atomic config writer. `gitmake_prepare` still never publishes; it stops at a reviewed plan. `gitmake_publish` uses the same zero-config preparation logic before requesting human approval.
 
-Agents are explicitly instructed not to create or edit `gitmake.json` with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.
+Agents are explicitly instructed not to create or edit `gitmake.json` with host filesystem Write/Edit tools when `gitmake_publish`, `gitmake_prepare`, or `gitmake_config_write` is available.
 
 ## Managed sync: safe by default
 
@@ -463,7 +477,7 @@ To expose guarded config write/patch and approved-plan apply:
 gitmake ai setup --write
 ```
 
-With Claude Code or another elicitation-capable client, `gitmake_apply` can request the approval directly in the client UI. If elicitation is unavailable, use the terminal `gitmake approve` fallback. No approval token copy/paste is needed.
+With Claude Code or another elicitation-capable client, `gitmake_publish` can perform the whole prepare/approve/apply lifecycle without ending the assistant turn to ask for approval manually. `gitmake_apply` continues to support direct chat approval for expert flows. If elicitation is unavailable, use `gitmake_prepare` → terminal `gitmake approve` → `gitmake_apply`. No approval token copy/paste is needed.
 
 ## Generic MCP clients
 
@@ -482,7 +496,7 @@ gitmake mcp
 gitmake mcp --allow-write
 ```
 
-Read-only MCP tools include project inspection, describe, doctor, discovery, config schema/validation/suggestion, preview, plan, and history. Guarded write mode adds config write/patch and reviewed apply. `gitmake_apply` can use client-controlled elicitation for human approval when supported, with terminal approval as fallback. There is no MCP force-push, repo-delete, history-rewrite, or unreviewed direct-publish tool.
+Read-only MCP tools include project inspection, describe, doctor, discovery, config schema/validation/suggestion, preview, plan, and history. Guarded write mode adds `gitmake_publish`, config write/patch, and reviewed apply. `gitmake_publish` is the primary normal publishing tool; it still creates a reviewed immutable plan and still requires client-controlled human approval before mutation. There is no MCP force-push, repo-delete, history-rewrite, or unreviewed direct-publish tool.
 
 Project-root resolution supports an explicit tool `project_dir`, `GITMAKE_PROJECT_DIR`, Claude's `CLAUDE_PROJECT_DIR`, then current working directory.
 

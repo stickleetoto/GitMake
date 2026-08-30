@@ -14,18 +14,16 @@ It accepts either:
 
 and turns it into a reviewed GitHub repository create/update and, optionally, a GitHub Release.
 
-Preferred workflow:
+Preferred normal AI workflow:
 
 ```text
 Project folder / ZIP
         ↓
-GitMake prepare
+gitmake_publish
         ↓
-Review plan
+reviewed plan + MCP human approval
         ↓
-Human approval
-        ↓
-GitMake apply
+exact-plan apply
         ↓
 GitHub
 ```
@@ -49,109 +47,61 @@ When the user says something like:
 
 If GitMake MCP tools are available, prefer them over shell commands.
 
-For normal publishing preparation, use the highest-level tool first:
+For a normal request to **actually publish/upload/create/update** a repository, use the highest-level tool first:
 
 ```text
-gitmake_prepare
+gitmake_publish
 ```
 
-Do not manually compose lower-level GitMake tools unless `gitmake_prepare` cannot finish the task or explicitly reports that more input is required.
+`gitmake_publish` is the primary publishing orchestrator. It keeps prepare, reviewed plan creation, client-controlled human approval, exact-plan revalidation, apply, and the final result inside one interactive MCP operation. **Do not stop the chat merely to ask the user for approval** when this tool is available; GitMake requests approval through the MCP client UI.
+
+Use `gitmake_prepare` when the user explicitly asks for a plan only, wants to inspect changes before deciding whether to publish, or when `gitmake_publish` reports that expert intervention/input is required.
 
 ---
 
 ## Preferred MCP workflow
 
-### 1. Prepare
+### Normal publish request
 
 Call:
+
+```text
+gitmake_publish
+```
+
+GitMake will:
+
+1. infer folder vs ZIP and zero-config settings
+2. run security/GitHub/project-identity preflight
+3. create the reviewed immutable plan
+4. open a client-controlled MCP approval prompt
+5. require stronger typed confirmation for medium/destructive risk
+6. revalidate the exact plan after approval
+7. apply the repository/release mutation
+8. return the final real result
+
+Do not answer, auto-accept, or simulate the approval on the user's behalf.
+
+If the user declines, report that nothing was published.
+
+If the MCP client does not support elicitation, use the compatibility workflow:
+
+```text
+gitmake_prepare
+→ show reviewed plan
+→ user runs `gitmake approve`
+→ gitmake_apply(plan_id)
+```
+
+### Plan-only request
+
+When the user explicitly says “prepare only”, “show me the plan”, or “do not publish yet”, call:
 
 ```text
 gitmake_prepare
 ```
 
-GitMake should determine as much as possible automatically, including:
-
-- folder vs ZIP source
-- repository name
-- CREATE vs UPDATE
-- branch
-- visibility
-- source snapshot
-- managed sync state
-- secret scan
-- project identity
-- deletion ratio
-- destructive risk
-- release settings
-- reviewed plan
-
-After prepare, show the user these important plan fields:
-
-```text
-Repository
-Mode
-Visibility
-Branch
-Source
-Changes
-Risk
-Destructive
-Release
-Plan ID
-```
-
-Do not claim that a repository already exists if the plan only says `CREATE`.
-Say **"will be created"** or **"planned create"** until apply succeeds.
-
-### 2. Obtain human approval
-
-If the user asked to **publish**, call `gitmake_apply` with the reviewed `plan_id`. On an MCP client that supports elicitation, GitMake will request approval through a **client-controlled human dialog before any GitHub mutation**.
-
-Never answer, auto-accept, or simulate that elicitation on the user's behalf. The approval must come from the MCP client/user interaction.
-
-Risk-adaptive chat approval:
-
-- low risk: user Accept / Decline
-- medium risk: user must enter `PUBLISH`
-- high/destructive: user must enter the plan-specific `DELETE-XXXXXX` phrase
-
-If the MCP client does not support elicitation, use the stable terminal fallback:
-
-```bash
-gitmake approve
-```
-
-For destructive fallback approval:
-
-```bash
-gitmake approve --destructive
-```
-
-GitMake uses the same short-lived, one-shot exact-plan grant for both transports. No approval token is copied into chat.
-
-### 3. Apply
-
-`gitmake_apply` either completes after client-controlled approval, uses an already-valid local fallback approval, or returns an approval-required error.
-
-Call it with the reviewed `plan_id`.
-
-GitMake verifies that the local approval grant matches the exact plan before mutating GitHub.
-
-After apply, report the real result:
-
-```text
-Repository
-Branch
-Push result
-Changes
-Release
-Security result
-Duration
-Repository URL
-Release URL (if any)
-```
-
-Do not retry a consumed approval grant as if it were reusable.
+and stop before mutation.
 
 ---
 
@@ -415,15 +365,24 @@ If GitMake MCP is available:
 Normal AI publishing flow:
 
 ```text
+gitmake_publish
+→ GitMake prepares and surfaces the reviewed plan
+→ GitMake requests human approval through the MCP client UI
+→ GitMake revalidates the exact reviewed plan
+→ GitMake applies the plan and returns the final publish result
+```
+
+Use `gitmake_prepare` only for an explicit plan-only request, or as part of the compatibility fallback when interactive elicitation is unavailable. The fallback remains:
+
+```text
 gitmake_prepare
 → show plan
+→ terminal `gitmake approve`
 → gitmake_apply(plan_id)
-→ GitMake requests human approval in the MCP client when supported
-→ terminal `gitmake approve` only as fallback
 → report result
 ```
 
-If `gitmake_apply` is missing, the MCP connection may be read-only, stale, or connected to an older GitMake version. If `gitmake_apply` exists but cannot open a human approval dialog, the client may not support MCP elicitation; use `gitmake approve` as fallback.
+If `gitmake_publish` is missing, the MCP connection may be read-only, stale, or connected to an older GitMake version. If `gitmake_publish` exists but reports that interactive elicitation is unavailable, use the fallback above.
 
 Do not bypass GitMake.
 

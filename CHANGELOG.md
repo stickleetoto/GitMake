@@ -1,3 +1,23 @@
+## v1.2.1 — Protocol Routing Hardening
+
+- Fixed modern MCP 2026-07-28 sessions being able to accidentally arm the legacy held-open `elicitation/create` path after `initialize`.
+- Legacy stdio elicitation is now enabled only for the 2025-11-25 protocol; modern publishing stays on MRTR `input_required` / `inputResponses`.
+- Tightened signed MCP approval state validation so the `purpose` binding is mandatory, not optional.
+- Added `e2e_v121.sh` to prove that a modern client which still sends `initialize` receives an MRTR `input_required` result rather than a legacy server-to-client request.
+- Updated LLM/Claude guidance so `gitmake_publish` is consistently documented as the normal publishing entry point, with prepare → terminal approve → apply only as the compatibility fallback.
+- Relaxed two historical E2E version assertions so they verify the stable v1 version/schema contract instead of incorrectly pinning the old `1.0.0` patch number.
+- No config, plan, project, CLI, safety, or lower-level MCP compatibility break.
+
+## v1.2.0 — One-shot Publish Orchestrator
+
+- Added `gitmake_publish`, the primary high-level MCP publishing tool.
+- `gitmake_publish` performs prepare → reviewed plan → client-controlled human approval → exact-plan revalidation → apply → final result in one interactive MCP operation.
+- Claude/LLMs no longer need to end a turn after planning just to ask the user to approve before a separate apply call.
+- Added both modern MCP 2026-07-28 MRTR (`input_required` / `inputResponses`) and legacy 2025-11-25 stdio elicitation support for the one-shot publish flow.
+- Added purpose-bound signed approval request state so a `gitmake_publish` approval state cannot be replayed as a standalone `gitmake_apply` approval state.
+- Preserved `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, tokenless one-shot grants, destructive confirmation, and all v1 safety invariants as stable expert/fallback paths.
+- Clients without elicitation are never bypassed: GitMake directs them to the stable prepare → terminal approve → apply fallback.
+
 ## v1.1.0 — MCP Chat Approval
 
 - Added human approval inside elicitation-capable MCP clients. `gitmake_apply` now requests a client-controlled form confirmation when no valid local approval grant exists.

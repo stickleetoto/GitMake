@@ -1,4 +1,4 @@
-GitMake v1.1.0 + AI/MCP
+GitMake v1.2.1 + AI/MCP
 
 ONE-CLICK CLAUDE SETUP
   gitmake ai setup
@@ -9,28 +9,31 @@ Enable reviewed write/apply tools:
 Status:
   gitmake ai status
 
-NORMAL AI WORKFLOW
-1. Ask Claude to publish or prepare the current project folder/ZIP.
-2. Claude should prefer the high-level `gitmake_prepare` MCP tool.
-3. Claude shows the reviewed plan, provenance, changes, and risk.
-4. Human runs:
-     gitmake approve
-5. Human tells Claude approval is complete.
-6. Claude calls `gitmake_apply` with only the reviewed plan ID.
+NORMAL AI PUBLISH WORKFLOW
+1. Ask Claude to publish/upload/create/update the current project folder or ZIP.
+2. Claude should call `gitmake_publish` first.
+3. GitMake prepares and surfaces the reviewed plan.
+4. GitMake requests human approval through the MCP client UI.
+5. After approval, GitMake revalidates the exact reviewed plan and applies it.
+6. The same logical publish operation returns the final repository/release result.
 
-There is no approval token to copy/paste in the v1 flow.
-The local approval grant is short-lived, single-use, and bound to the exact reviewed plan.
+Do not stop the chat merely to ask for approval when `gitmake_publish` and MCP elicitation are available. Never auto-accept the human approval dialog.
 
-Destructive plan:
+PLAN-ONLY WORKFLOW
+Use `gitmake_prepare` when the user explicitly asks to inspect/prepare a plan without publishing.
+
+COMPATIBILITY FALLBACK
+If the MCP client cannot perform elicitation:
+  gitmake_prepare
+  gitmake approve
+  gitmake_apply(plan_id)
+
+There is no normal approval token to copy/paste in the v1 flow. The local fallback grant is short-lived, single-use, and bound to the exact reviewed plan.
+
+Destructive terminal fallback:
   gitmake approve --destructive
 
-Read-only MCP remains the default. GitMake never exposes a tool that can create its own human approval grant.
+Read-only MCP remains the default. GitMake never exposes a tool that can create its own human approval grant without a client-controlled human response or terminal approval.
 
 Generic MCP descriptor:
   gitmake ai setup --client generic --json
-
-
-GitMake v1.1 Chat Approval
-- With write MCP enabled, gitmake_apply can request human approval inside Claude Code through MCP elicitation.
-- If the client cannot elicit, run: gitmake approve
-- Never configure an auto-approval elicitation hook if you require manual GitMake approval.

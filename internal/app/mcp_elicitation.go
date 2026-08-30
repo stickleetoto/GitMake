@@ -30,6 +30,7 @@ type mcpInputRequiredResult struct {
 type mcpApprovalState struct {
 	PlanID      string `json:"plan_id"`
 	Fingerprint string `json:"fingerprint"`
+	Purpose     string `json:"purpose,omitempty"`
 	ExpiresUnix int64  `json:"expires_unix"`
 	Nonce       string `json:"nonce"`
 }
@@ -80,8 +81,8 @@ func (s *mcpServer) approvalPrompt(plan planstore.Plan) (message string, schema 
 		level = "low"
 	}
 	message = fmt.Sprintf(
-		"GitMake wants your approval to %s %s. Changes: +%d ~%d -%d. Visibility: %s. Risk: %s. Plan: %s. GitMake will revalidate the exact reviewed plan before publishing.",
-		strings.ToLower(plan.Mode), plan.Repository, plan.Changes.Added, plan.Changes.Modified, plan.Changes.Deleted, plan.Visibility, level, plan.ID,
+		"GitMake wants your approval to %s %s. Source: %s. Changes: +%d ~%d -%d. Visibility: %s. Risk: %s. Plan: %s. GitMake will revalidate the exact reviewed plan before publishing.",
+		strings.ToLower(plan.Mode), plan.Repository, plan.SourcePath, plan.Changes.Added, plan.Changes.Modified, plan.Changes.Deleted, plan.Visibility, level, plan.ID,
 	)
 	props := map[string]any{}
 	required := []string{}
@@ -142,6 +143,10 @@ func (s *mcpServer) ensureStateSecret() error {
 }
 
 func (s *mcpServer) createApprovalRequestState(plan planstore.Plan) (string, error) {
+	return s.createApprovalRequestStateFor(plan, "apply")
+}
+
+func (s *mcpServer) createApprovalRequestStateFor(plan planstore.Plan, purpose string) (string, error) {
 	if err := s.ensureStateSecret(); err != nil {
 		return "", err
 	}
@@ -152,6 +157,7 @@ func (s *mcpServer) createApprovalRequestState(plan planstore.Plan) (string, err
 	st := mcpApprovalState{
 		PlanID:      plan.ID,
 		Fingerprint: plan.Fingerprint,
+		Purpose:     purpose,
 		ExpiresUnix: time.Now().UTC().Add(10 * time.Minute).Unix(),
 		Nonce:       base64.RawURLEncoding.EncodeToString(nonceRaw),
 	}
@@ -166,37 +172,135 @@ func (s *mcpServer) createApprovalRequestState(plan planstore.Plan) (string, err
 }
 
 func (s *mcpServer) validateApprovalRequestState(encoded string, plan planstore.Plan) error {
+	return s.validateApprovalRequestStateFor(encoded, plan, "apply")
+}
+
+func (s *mcpServer) decodeApprovalRequestState(encoded string) (mcpApprovalState, error) {
 	if err := s.ensureStateSecret(); err != nil {
-		return err
+		return mcpApprovalState{}, err
 	}
 	parts := strings.Split(encoded, ".")
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid MCP approval request state")
+		return mcpApprovalState{}, fmt.Errorf("invalid MCP approval request state")
 	}
 	body, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return fmt.Errorf("invalid MCP approval request state")
+		return mcpApprovalState{}, fmt.Errorf("invalid MCP approval request state")
 	}
 	sig, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return fmt.Errorf("invalid MCP approval request state")
+		return mcpApprovalState{}, fmt.Errorf("invalid MCP approval request state")
 	}
 	mac := hmac.New(sha256.New, s.stateSecret)
 	_, _ = mac.Write(body)
 	if !hmac.Equal(sig, mac.Sum(nil)) {
-		return fmt.Errorf("invalid MCP approval request state signature")
+		return mcpApprovalState{}, fmt.Errorf("invalid MCP approval request state signature")
 	}
 	var st mcpApprovalState
 	if err := json.Unmarshal(body, &st); err != nil {
-		return fmt.Errorf("invalid MCP approval request state")
+		return mcpApprovalState{}, fmt.Errorf("invalid MCP approval request state")
+	}
+	if time.Now().UTC().Unix() > st.ExpiresUnix {
+		return mcpApprovalState{}, fmt.Errorf("MCP approval request expired; ask GitMake to apply again")
+	}
+	return st, nil
+}
+
+func (s *mcpServer) validateApprovalRequestStateFor(encoded string, plan planstore.Plan, purpose string) error {
+	st, err := s.decodeApprovalRequestState(encoded)
+	if err != nil {
+		return err
 	}
 	if st.PlanID != plan.ID || !strings.EqualFold(st.Fingerprint, plan.Fingerprint) {
 		return fmt.Errorf("MCP approval request no longer matches the reviewed plan")
 	}
-	if time.Now().UTC().Unix() > st.ExpiresUnix {
-		return fmt.Errorf("MCP approval request expired; ask GitMake to apply again")
+	if st.Purpose != purpose {
+		if st.Purpose == "" {
+			return fmt.Errorf("MCP approval request is missing its purpose binding")
+		}
+		return fmt.Errorf("MCP approval request is for %s, not %s", st.Purpose, purpose)
 	}
 	return nil
+}
+
+func preparedPlan(result any) (planstore.Plan, error) {
+	root, ok := result.(map[string]any)
+	if !ok {
+		return planstore.Plan{}, fmt.Errorf("GitMake prepare returned an unexpected result")
+	}
+	raw, ok := root["plan"]
+	if !ok {
+		return planstore.Plan{}, fmt.Errorf("GitMake prepare did not return a reviewed plan")
+	}
+	b, err := json.Marshal(raw)
+	if err != nil {
+		return planstore.Plan{}, fmt.Errorf("encode prepared plan: %w", err)
+	}
+	var summary planstore.Plan
+	if err := json.Unmarshal(b, &summary); err != nil {
+		return planstore.Plan{}, fmt.Errorf("decode prepared plan: %w", err)
+	}
+	if summary.ID == "" {
+		return planstore.Plan{}, fmt.Errorf("prepared plan is missing plan_id")
+	}
+	plan, _, err := planstore.Load(summary.ID)
+	if err != nil {
+		return planstore.Plan{}, err
+	}
+	if summary.Fingerprint != "" && !strings.EqualFold(summary.Fingerprint, plan.Fingerprint) {
+		return planstore.Plan{}, fmt.Errorf("prepared plan fingerprint does not match stored reviewed plan")
+	}
+	return plan, nil
+}
+
+func publishCompletion(plan planstore.Plan, applyResult any) map[string]any {
+	return map[string]any{
+		"schema":         "gitmake.publish/v1",
+		"ok":             true,
+		"status":         "published",
+		"version":        Version,
+		"plan_id":        plan.ID,
+		"repository":     plan.Repository,
+		"mode":           plan.Mode,
+		"visibility":     plan.Visibility,
+		"branch":         plan.Branch,
+		"source":         plan.SourcePath,
+		"changes":        plan.Changes,
+		"risk":           plan.Risk,
+		"release":        plan.Release,
+		"github_mutated": true,
+		"apply":          applyResult,
+	}
+}
+
+func publishDeclined(plan planstore.Plan) map[string]any {
+	return map[string]any{
+		"schema": "gitmake.publish/v1", "ok": false, "status": "approval_declined",
+		"plan_id": plan.ID, "repository": plan.Repository, "changes": plan.Changes,
+		"risk": plan.Risk, "github_mutated": false,
+	}
+}
+
+func publishArgs(p mcpToolCallParams) (projectDir, sourcePath string, persist bool, err error) {
+	projectDir, err = stringArg(p.Arguments, "project_dir", false)
+	if err != nil {
+		return "", "", false, err
+	}
+	sourcePath, err = stringArg(p.Arguments, "source_path", false)
+	if err != nil {
+		return "", "", false, err
+	}
+	legacyZIP, err := stringArg(p.Arguments, "source_zip", false)
+	if err != nil {
+		return "", "", false, err
+	}
+	if sourcePath == "" {
+		sourcePath = legacyZIP
+	} else if legacyZIP != "" && sourcePath != legacyZIP {
+		return "", "", false, fmt.Errorf("source_path and source_zip disagree; provide only source_path")
+	}
+	persist, err = boolArg(p.Arguments, "persist_config", false)
+	return projectDir, sourcePath, persist, err
 }
 
 func (s *mcpServer) validateApprovalInput(plan planstore.Plan, response mcpInputResponse) (bool, error) {
@@ -280,6 +384,78 @@ func (s *mcpServer) modernApplyResult(p mcpToolCallParams) (result any, inputReq
 	}
 	result, err = s.callTool(p.Name, p.Arguments)
 	return result, nil, true, err
+}
+
+func (s *mcpServer) modernPublishResult(p mcpToolCallParams) (result any, inputRequired *mcpInputRequiredResult, handled bool, err error) {
+	if p.Name != "gitmake_publish" {
+		return nil, nil, false, nil
+	}
+	if !s.allowWrite {
+		return nil, nil, true, fmt.Errorf("MCP write tools are disabled; run `gitmake ai setup --write`")
+	}
+
+	if len(p.InputResponses) == 0 {
+		projectDir, sourcePath, persist, err := publishArgs(p)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		prepared, err := s.prepareProject(projectDir, sourcePath, persist)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		plan, err := preparedPlan(prepared)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		state, err := s.createApprovalRequestStateFor(plan, "publish")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return nil, &mcpInputRequiredResult{
+			ResultType: "input_required",
+			InputRequests: map[string]map[string]any{
+				mcpApprovalInputKey: s.approvalInputRequest(plan),
+			},
+			RequestState: state,
+		}, true, nil
+	}
+
+	st, err := s.decodeApprovalRequestState(p.RequestState)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if st.Purpose != "publish" {
+		return nil, nil, true, fmt.Errorf("MCP approval request is not for gitmake_publish")
+	}
+	plan, _, err := planstore.Load(st.PlanID)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if err := s.validateApprovalRequestStateFor(p.RequestState, plan, "publish"); err != nil {
+		return nil, nil, true, err
+	}
+	response, ok := p.InputResponses[mcpApprovalInputKey]
+	if !ok {
+		return nil, nil, true, fmt.Errorf("MCP approval response is missing")
+	}
+	accepted, err := s.validateApprovalInput(plan, response)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if !accepted {
+		return publishDeclined(plan), nil, true, nil
+	}
+	if _, err := approval.CreateGrant(plan.ID, approvalBindingFromPlan(plan), plan.Risk.Destructive); err != nil {
+		return nil, nil, true, fmt.Errorf("record MCP human approval: %w", err)
+	}
+	applyResult, err := s.callTool("gitmake_apply", map[string]any{
+		"project_dir": plan.WorkingDirectory,
+		"plan_id":     plan.ID,
+	})
+	if err != nil {
+		return applyResult, nil, true, err
+	}
+	return publishCompletion(plan, applyResult), nil, true, nil
 }
 
 func (s *mcpServer) legacyShouldElicit(p mcpToolCallParams) (planstore.Plan, bool) {
@@ -371,6 +547,80 @@ func (s *mcpServer) legacyApplyWithElicitation(req mcpRequest, p mcpToolCallPara
 	}
 	if err := scanner.Err(); err != nil {
 		return base, fmt.Errorf("read MCP elicitation response: %w", err)
+	}
+	return s.toolErrorResponse(base, fmt.Errorf("MCP client disconnected before approval was answered"), false), nil
+}
+
+func (s *mcpServer) legacyPublishWithElicitation(req mcpRequest, p mcpToolCallParams, scanner lineScanner, enc responseEncoder) (mcpResponse, error) {
+	base := mcpResponse{JSONRPC: "2.0", ID: req.ID}
+	if !s.allowWrite {
+		return s.toolErrorResponse(base, fmt.Errorf("MCP write tools are disabled; run `gitmake ai setup --write`"), false), nil
+	}
+	projectDir, sourcePath, persist, err := publishArgs(p)
+	if err != nil {
+		return s.toolErrorResponse(base, err, false), nil
+	}
+	prepared, err := s.prepareProject(projectDir, sourcePath, persist)
+	if err != nil {
+		return s.toolErrorResponse(base, err, false), nil
+	}
+	plan, err := preparedPlan(prepared)
+	if err != nil {
+		return s.toolErrorResponse(base, err, false), nil
+	}
+
+	s.nextServerRequest++
+	requestID := fmt.Sprintf("gitmake-publish-elicitation-%d", s.nextServerRequest)
+	request := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      requestID,
+		"method":  "elicitation/create",
+		"params":  s.approvalInputRequest(plan)["params"],
+	}
+	if err := enc.Encode(request); err != nil {
+		return base, fmt.Errorf("write MCP publish elicitation request: %w", err)
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var msg mcpLegacyResponse
+		if err := json.Unmarshal([]byte(line), &msg); err != nil {
+			continue
+		}
+		if fmt.Sprint(msg.ID) != requestID {
+			continue
+		}
+		if msg.Error != nil {
+			return s.toolErrorResponse(base, fmt.Errorf("MCP elicitation failed: %s", msg.Error.Message), false), nil
+		}
+		var response mcpInputResponse
+		if err := json.Unmarshal(msg.Result, &response); err != nil {
+			return s.toolErrorResponse(base, fmt.Errorf("parse MCP elicitation response: %w", err), false), nil
+		}
+		accepted, err := s.validateApprovalInput(plan, response)
+		if err != nil {
+			return s.toolErrorResponse(base, err, false), nil
+		}
+		if !accepted {
+			return s.toolSuccessResponse(base, publishDeclined(plan), false), nil
+		}
+		if _, err := approval.CreateGrant(plan.ID, approvalBindingFromPlan(plan), plan.Risk.Destructive); err != nil {
+			return s.toolErrorResponse(base, fmt.Errorf("record MCP human approval: %w", err), false), nil
+		}
+		applyResult, err := s.callTool("gitmake_apply", map[string]any{
+			"project_dir": plan.WorkingDirectory,
+			"plan_id":     plan.ID,
+		})
+		if err != nil {
+			return s.toolErrorResponse(base, err, false), nil
+		}
+		return s.toolSuccessResponse(base, publishCompletion(plan, applyResult), false), nil
+	}
+	if err := scanner.Err(); err != nil {
+		return base, fmt.Errorf("read MCP publish elicitation response: %w", err)
 	}
 	return s.toolErrorResponse(base, fmt.Errorf("MCP client disconnected before approval was answered"), false), nil
 }

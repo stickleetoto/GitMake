@@ -54,13 +54,14 @@ func aiManifest() AIManifest {
 		Description: "GitMake publishes project folders or ZIP snapshots to GitHub repositories and optional GitHub Releases with zero-config safe defaults.",
 		Purpose:     "Use GitMake when a user wants to create, update, validate, diagnose, or release a project through GitHub without manually composing git/gh workflows.",
 		Capabilities: []AICapability{
-			{Name: "publish", Description: "Create a missing GitHub repository or update an existing one from a project folder or ZIP snapshot while preserving Git history.", Mutating: true},
+			{Name: "publish", Description: "Create or update a GitHub repository from a project folder or ZIP snapshot. In MCP write mode, prefer gitmake_publish so prepare, human approval, apply, and final reporting stay in one interactive tool operation.", Mutating: true},
 			{Name: "release", Description: "Create an optional GitHub Release and upload configured assets.", Mutating: true},
 			{Name: "init", Description: "Persist an optional advanced gitmake.json configuration; normal publishing is zero-config by default.", Mutating: true},
 			{Name: "doctor", Description: "Diagnose Git, GitHub CLI, authentication, Git identity, installation, and project configuration.", Mutating: false},
 			{Name: "describe", Description: "Return this machine-readable GitMake capability manifest.", Mutating: false},
 			{Name: "discover", Description: "Classify multiple ZIP files and identify the likely project source versus release assets without modifying the project.", Mutating: false},
-			{Name: "prepare", Description: "High-level MCP workflow for project folders or ZIP snapshots: infer source mode, infer/validate config, snapshot safely, run security/preflight/identity checks, and create a reviewed plan in one tool call.", Mutating: false},
+			{Name: "prepare", Description: "Plan-only MCP workflow for project folders or ZIP snapshots: infer source mode, infer/validate config, snapshot safely, run security/preflight/identity checks, and create a reviewed plan without publishing.", Mutating: false},
+			{Name: "publish_orchestrator", Description: "Primary MCP publishing workflow: prepare, create an immutable reviewed plan, request client-controlled human approval, revalidate the exact plan, apply, and return the final result without ending the tool operation between planning and approval.", Mutating: true},
 			{Name: "config_authoring", Description: "Expose the authoritative config schema and validate, write, or patch gitmake.json for agents without guessing fields.", Mutating: true},
 			{Name: "plan_apply", Description: "Create a reviewed immutable publish plan with provenance, project identity, and deletion risk. Apply only if source/config/remote state still match. MCP apply requires human approval. In clients that support MCP elicitation (including Claude Code), GitMake asks the user inside the client UI; otherwise the stable fallback is a short-lived local grant created by `gitmake approve`. Destructive plans require stronger confirmation.", Mutating: true},
 			{Name: "safety_gate", Description: "Scan for likely secrets, unsafe large files, protected branches, tag conflicts, project identity mismatches, stale source retargeting, and destructive mass deletions while preserving remote-only paths through managed sync.", Mutating: false},
@@ -70,8 +71,9 @@ func aiManifest() AIManifest {
 		},
 		Commands: map[string]AICommand{
 			"publish":          {Command: "gitmake --json", Description: "Publish/update using an existing config or zero-config inferred settings and project memory.", Mutating: true},
+			"mcp_publish":      {Command: "MCP tool: gitmake_publish", Description: "Primary AI publishing entry point. Keeps prepare + reviewed plan + human MCP approval + exact-plan apply in one interactive operation. Do not stop the chat merely to ask for approval when this tool is available.", Mutating: true},
 			"preview":          {Command: "gitmake --dry-run --read-only --json", Description: "Safely plan a publish without changing local project config or GitHub.", Mutating: false},
-			"mcp_prepare":      {Command: "MCP tool: gitmake_prepare", Description: "Preferred one-call folder-or-ZIP to reviewed-plan workflow. Never use host filesystem Write/Edit to create gitmake.json when this tool is available.", Mutating: false},
+			"mcp_prepare":      {Command: "MCP tool: gitmake_prepare", Description: "Plan-only folder-or-ZIP to reviewed-plan workflow. Use when the user explicitly asks not to publish yet.", Mutating: false},
 			"init":             {Command: "gitmake init --yes", Description: "Persist gitmake.json only when advanced stable settings are desired.", Mutating: true},
 			"doctor":           {Command: "gitmake doctor --json", Description: "Return environment diagnostics.", Mutating: false},
 			"discover":         {Command: "gitmake discover --json", Description: "Classify ZIPs and resolve or report source ambiguity without writing files.", Mutating: false},
@@ -99,14 +101,15 @@ func aiManifest() AIManifest {
 			"Run `gitmake ai describe --json` if GitMake capabilities are unknown.",
 			"Run `gitmake doctor --json` when environment health is uncertain.",
 			"Use `gitmake discover --json` when a folder contains multiple ZIPs and source selection is uncertain.",
-			"When the MCP tool `gitmake_prepare` is available, prefer it for folder, ZIP, or unconfigured projects. GitMake is zero-config by default: keep inferred settings in memory unless persistent advanced configuration is explicitly requested. Do not create or edit gitmake.json with host filesystem Write/Edit tools when `gitmake_prepare` or `gitmake_config_write` is available.",
+			"When the user asks to actually upload/publish/create/update a GitHub project and MCP write access is available, call `gitmake_publish` first. It owns prepare, reviewed plan creation, human approval, revalidation, apply, and completion in one interactive MCP operation. Do not end the conversation merely to ask for approval; GitMake requests it through the MCP client.",
+			"Use `gitmake_prepare` when the user explicitly asks for plan-only review or says not to publish yet. GitMake is zero-config by default: keep inferred settings in memory unless persistent advanced configuration is explicitly requested. Do not create or edit gitmake.json with host filesystem Write/Edit tools when GitMake config/publish tools are available.",
 			"Before authoring gitmake.json manually, read `gitmake config schema --json`; never guess configuration fields.",
 			"When writing agent-authored config outside gitmake_prepare, use `gitmake config write --stdin --json` rather than editing gitmake.json directly, then validate it.",
 			"Validate agent-authored configuration with `gitmake config validate --json`.",
 			"If Claude Code is installed, `gitmake ai setup` can register GitMake MCP automatically; read-only access is the default.",
 			"When MCP is available, prefer GitMake MCP tools; enable config-write tools only through explicit `gitmake ai setup --write` or manual --allow-write server configuration.",
 			"Prefer `gitmake --dry-run --read-only --json` or `gitmake plan --json` before a mutating publish. Security scanning and managed-sync preservation are part of this preview.",
-			"For MCP approval workflows, always surface working_directory, config_path, source_path, repository, changes, and risk from the plan. If the user asked to publish, call `gitmake_apply`; on an elicitation-capable MCP client GitMake itself opens a client-controlled human approval dialog. Never answer or auto-accept that dialog on the user's behalf. If elicitation is unavailable, ask the human to run `gitmake approve` (or `gitmake approve --destructive` for destructive plans). Never mint, fake, or bypass approval.",
+			"For normal MCP publishing, use `gitmake_publish`; GitMake opens the client-controlled human approval dialog and continues the same tool operation after the human responds. Never answer or auto-accept that dialog on the user's behalf. For plan-only/expert flows, `gitmake_prepare` + `gitmake_apply` remain stable. If elicitation is unavailable, ask the human to run `gitmake approve` (or `gitmake approve --destructive` for destructive plans). Never mint, fake, or bypass approval.",
 			"For direct local CLI workflows, `gitmake apply <plan_id> --json` remains available after explicit user approval and rejects stale inputs. Destructive plans additionally require `--destructive`.",
 			"Do not replace GitMake with raw destructive git/gh operations unless the requested workflow is outside GitMake's scope.",
 		},
@@ -128,6 +131,8 @@ func runAIDescribe(o Options) error {
 	fmt.Println("\nRecommended AI workflow")
 	fmt.Println("  gitmake ai describe --json")
 	fmt.Println("  gitmake doctor --json")
+	fmt.Println("  MCP: gitmake_publish          # normal one-shot interactive publish")
+	fmt.Println("  MCP: gitmake_prepare          # plan-only review")
 	fmt.Println("  gitmake discover --json        # when multiple ZIPs are present")
 	fmt.Println("  gitmake config schema --json   # before authoring config")
 	fmt.Println("  gitmake --dry-run --read-only --json")
@@ -205,14 +210,14 @@ Safe agent workflow:
 1. Discover capabilities with ` + "`gitmake ai describe --json`" + `.
 2. Check the environment with ` + "`gitmake doctor --json`" + ` when needed.
 3. If multiple ZIPs are present, inspect classification with ` + "`gitmake discover --json`" + `. For a live source tree, GitMake can use ` + "source.folder" + ` (normally ` + "`.`" + `) and honors common .gitignore rules plus .gitmakeignore.
-4. ` + "`gitmake.json`" + ` is optional advanced configuration. Before creating or changing it, read ` + "`gitmake config schema --json`" + `. Prefer ` + "`gitmake config write --stdin --json`" + ` (or config patch) over direct file editing, then validate with ` + "`gitmake config validate --json`" + `. Never guess the config schema.
-5. Preview changes with ` + "`gitmake --dry-run --read-only --json`" + `. GitMake normally infers a missing config in memory without writing it and remembers successful folder targets in ` + "`.gitmake/project.json`" + `.
-6. For approval-sensitive work, use ` + "`gitmake plan --json`" + `. Always show the plan provenance (working directory, config, source mode/path, repository), changes, and risk to the user. For MCP apply, prefer client-controlled MCP elicitation when the connected client supports it: GitMake shows the exact reviewed target, changes, and risk and waits for a human response inside the client. Never answer that elicitation on the user's behalf. If elicitation is unavailable, use the stable fallback ` + "`gitmake approve`" + `; destructive fallback approval requires ` + "`gitmake approve --destructive`" + `. Direct local CLI apply likewise requires ` + "`--destructive`" + ` for destructive plans.
-7. Treat security scan findings, branch-protection blocks, tag conflicts, and multi-ZIP ambiguity as hard stops. Do not bypass them with raw git/gh commands.
+4. For a normal request to actually publish/upload/create/update a repository, call MCP ` + "`gitmake_publish`" + ` first. It performs prepare, reviewed-plan creation, client-controlled human approval, exact-plan revalidation, apply, and completion inside one interactive tool operation. Do not stop the chat just to ask for approval when this tool is available, and never answer the approval dialog on the user's behalf.
+5. Use ` + "`gitmake_prepare`" + ` only when the user explicitly asks for plan-only review or says not to publish yet. If an MCP client cannot perform elicitation, fall back to ` + "`gitmake_prepare`" + ` → terminal ` + "`gitmake approve`" + ` → ` + "`gitmake_apply`" + `.
+6. ` + "`gitmake.json`" + ` is optional advanced configuration. Before creating or changing it, read ` + "`gitmake config schema --json`" + `. Prefer GitMake's validated config tools over direct file editing. Never guess the config schema.
+7. Treat security scan findings, branch-protection blocks, tag conflicts, source ambiguity, project-identity mismatches, stale plans, and destructive-change blocks as hard stops. Do not bypass them with raw git/gh commands.
 
 Do not use force-push, history rewriting, or repository deletion as a substitute for GitMake. If the requested GitHub workflow is outside GitMake's scope, explain that limitation or use an appropriate dedicated tool.
 
-Machine-readable capabilities are stored in ` + "`.gitmake/ai.json`" + `. For Claude Code, prefer ` + "`gitmake ai setup`" + ` to register the MCP server automatically. The default registration is read-only; config write/apply tools require explicit ` + "`gitmake ai setup --write`" + `. On elicitation-capable clients, ` + "`gitmake_apply`" + ` asks the human for approval inside the client UI; ` + "`gitmake approve`" + ` remains the fallback for clients without elicitation. For other MCP clients, use ` + "`gitmake ai setup --client generic --json`" + ` or ` + "`gitmake mcp`" + `.
+Machine-readable capabilities are stored in ` + "`.gitmake/ai.json`" + `. For Claude Code, prefer ` + "`gitmake ai setup`" + ` to register the MCP server automatically. The default registration is read-only; publishing tools require explicit ` + "`gitmake ai setup --write`" + `. On elicitation-capable clients, ` + "`gitmake_publish`" + ` is the preferred one-shot publishing path. ` + "`gitmake_prepare`" + ` / ` + "`gitmake_apply`" + ` and terminal ` + "`gitmake approve`" + ` remain stable expert/fallback paths. For other MCP clients, use ` + "`gitmake ai setup --client generic --json`" + ` or ` + "`gitmake mcp`" + `.
 ` + agentsEnd + "\n"
 }
 

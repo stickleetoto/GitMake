@@ -56,10 +56,79 @@ func TestMCPAllowWriteAddsGatedTools(t *testing.T) {
 	for _, tool := range s.tools() {
 		names[tool.Name] = true
 	}
-	for _, want := range []string{"gitmake_config_write", "gitmake_config_patch", "gitmake_apply"} {
+	for _, want := range []string{"gitmake_publish", "gitmake_config_write", "gitmake_config_patch", "gitmake_apply"} {
 		if !names[want] {
 			t.Fatalf("missing write tool %s", want)
 		}
+	}
+}
+
+func TestMCPPublishIsPrimaryWriteTool(t *testing.T) {
+	readOnly := &mcpServer{}
+	for _, tool := range readOnly.tools() {
+		if tool.Name == "gitmake_publish" {
+			t.Fatal("gitmake_publish must not be exposed by read-only MCP")
+		}
+	}
+
+	s := &mcpServer{allowWrite: true}
+	for _, tool := range s.tools() {
+		if tool.Name != "gitmake_publish" {
+			continue
+		}
+		b, _ := json.Marshal(tool)
+		for _, want := range []string{"PRIMARY PUBLISHING TOOL", "ONE interactive MCP operation", "Do NOT stop the conversation"} {
+			if !bytes.Contains(b, []byte(want)) {
+				t.Fatalf("publish tool missing routing guidance %q: %s", want, b)
+			}
+		}
+		return
+	}
+	t.Fatal("gitmake_publish tool missing")
+}
+
+func TestMCPPublishApprovalStateCannotBeReusedAsApplyState(t *testing.T) {
+	plan := planstore.Plan{ID: "gm_publish_state", Fingerprint: "fp", SourceSHA256: "src", Repository: "owner/repo"}
+	s := &mcpServer{}
+	state, err := s.createApprovalRequestStateFor(plan, "publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.validateApprovalRequestStateFor(state, plan, "publish"); err != nil {
+		t.Fatalf("publish state should validate for publish: %v", err)
+	}
+	if err := s.validateApprovalRequestState(state, plan); err == nil {
+		t.Fatal("publish requestState must not validate as gitmake_apply state")
+	}
+}
+
+func TestMCPModernInitializeDoesNotEnableLegacyElicitation(t *testing.T) {
+	s := &mcpServer{}
+	params, _ := json.Marshal(map[string]any{
+		"protocolVersion": mcpProtocolModern,
+		"capabilities":    map[string]any{"elicitation": map[string]any{}},
+	})
+	resp, ok := s.handle(mcpRequest{JSONRPC: "2.0", ID: float64(1), Method: "initialize", Params: params})
+	if !ok || resp.Error != nil {
+		t.Fatalf("modern initialize failed: %#v", resp)
+	}
+	if s.legacyElicitation {
+		t.Fatal("modern MCP initialization must not activate the legacy held-open elicitation path")
+	}
+	if s.legacyProtocol != mcpProtocolModern {
+		t.Fatalf("unexpected remembered protocol: %q", s.legacyProtocol)
+	}
+}
+
+func TestMCPApprovalStateRequiresExactPurposeBinding(t *testing.T) {
+	plan := planstore.Plan{ID: "gm_purpose_required", Fingerprint: "fp", SourceSHA256: "src", Repository: "owner/repo"}
+	s := &mcpServer{}
+	state, err := s.createApprovalRequestStateFor(plan, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.validateApprovalRequestStateFor(state, plan, "publish"); err == nil || !bytes.Contains([]byte(err.Error()), []byte("missing its purpose binding")) {
+		t.Fatalf("purpose-less approval state must be rejected, got %v", err)
 	}
 }
 

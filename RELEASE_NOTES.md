@@ -1,50 +1,31 @@
-# GitMake v1.1.0 — MCP Chat Approval
+# GitMake v1.2.1 — Protocol Routing Hardening
 
-GitMake v1.1.0 is a backward-compatible v1 release that removes the last common approval-context switch for AI users.
-
-When a connected MCP client supports **elicitation**, `gitmake_apply` can now ask the human for approval directly inside the client UI. Claude Code supports MCP elicitation dialogs. The model cannot create an approval through a GitMake tool; it triggers the client-controlled request and GitMake only proceeds after an accepted response.
-
-## Approval flow
+GitMake v1.2.1 is a focused hardening patch for the v1.2 one-shot publish orchestrator. The public workflow remains the same:
 
 ```text
-project folder / ZIP
-→ gitmake_prepare
-→ reviewed plan
-→ gitmake_apply(plan_id)
-→ human approval dialog in MCP client
+gitmake_publish
+→ reviewed immutable plan
+→ client-controlled human approval
 → exact-plan revalidation
-→ GitHub publish
+→ apply
+→ final repository/release result
 ```
 
-Risk remains adaptive:
+## Fixed
 
-- low: Accept / Decline
-- medium: human must enter `PUBLISH`
-- high/destructive: human must enter the plan-specific `DELETE-XXXXXX` phrase
+A modern MCP 2026-07-28 client that performed `initialize` with elicitation support could leave the server's legacy elicitation flag enabled. On stdio, that could route a later `gitmake_publish` call into the old held-open `elicitation/create` path instead of returning the modern MRTR `input_required` result.
 
-If the client does not support elicitation, the frozen v1 fallback remains:
+v1.2.1 now enables the legacy held-open path only for protocol `2025-11-25`. Modern `2026-07-28` requests remain on the MRTR flow.
 
-```text
-gitmake approve
-```
+Signed approval request state is also stricter: its `purpose` binding is now mandatory. A purpose-less state is rejected, and publish/apply states remain isolated from each other.
 
-No approval token copy/paste is used.
+## Documentation and test cleanup
 
-## Protocol support
-
-- MCP 2026-07-28 Multi Round-Trip Requests (`input_required`, `inputResponses`, signed expiring `requestState`)
-- MCP `server/discover`
-- Legacy 2025-11-25 stdio `elicitation/create` for older/stateful clients
-- Existing direct tools/list and v1 tool names remain compatible
-
-## Safety hardening
-
-- Chat approval binds to the exact reviewed plan fingerprint, source/config hashes, and repository.
-- Request state is signed and expires.
-- Accepted approval becomes the same short-lived single-use local grant used by terminal approval.
-- A consumed grant cannot be re-minted for the same reviewed plan, preventing elicitation replay from authorizing a second mutation.
-- Existing plan/repository locks, stale-plan checks, secret scanning, managed sync, project identity, destructive gates, and no-force-push/no-history-rewrite/no-repo-delete invariants remain.
+- `GITMAKE_FOR_LLM.md`, Quick Start, and Claude MCP setup now consistently describe `gitmake_publish` as the normal AI publishing entry point.
+- prepare → terminal approve → apply is documented as the compatibility fallback, not the default path.
+- Added a v1.2.1 protocol-routing E2E regression test.
+- Historical v0.4/v0.5 E2E checks no longer pin the obsolete `1.0.0` patch version; they validate the stable v1 version/schema contract instead.
 
 ## Compatibility
 
-The v1 stability contract is preserved. `gitmake approve` is still supported and remains the fallback for clients without elicitation.
+No v1 public interface is removed or repurposed. `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, v1 schemas, risk-adaptive confirmation, managed sync, project identity, stale-plan checks, mutation locks, and the no-force-push/no-history-rewrite/no-repository-delete safety model remain unchanged.

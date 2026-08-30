@@ -1,105 +1,60 @@
-# GitMake v1.1.0 Test Report
+# GitMake v1.2.1 Test Report
 
-Date: 2026-08-25
+## Release gate
 
-## Result
+**PASS** for the v1.2.1 Protocol Routing Hardening patch.
 
-**PASS** for the v1.1.0 release gate covering MCP Chat Approval, the frozen v1 tokenless approval fallback, replay resistance, current v1/v0.10/v0.9/v0.8 behavior, and multi-platform builds.
+The patch changes only MCP protocol routing, approval-state purpose validation, documentation, and stale historical test assertions. The v1.2 one-shot publish workflow and frozen v1 safety model remain intact.
 
-## Static / unit / race
+## Core Go validation
 
-- `gofmt -l .` — PASS (no unformatted files)
 - `go test ./...` — PASS
 - `go vet ./...` — PASS
 - `go test -race ./...` — PASS
-- repository self secret-scan regression — PASS through the security scanner test suite
 
-## v1.1.0 MCP Chat Approval E2E
+New unit coverage verifies:
 
-`scripts/e2e_v110.sh` — **V110_CHAT_APPROVAL_E2E_PASS**
+- modern `2026-07-28` initialization does not activate the legacy held-open elicitation path
+- approval request state without an exact purpose binding is rejected
+- publish approval state cannot be reused as apply approval state
 
-Covered:
+## Current E2E release gates
 
-1. Modern MCP 2026-07-28 Multi Round-Trip flow returns `input_required` when `gitmake_apply` needs human approval.
-2. The approval request uses client-controlled `elicitation/create` input and a signed, expiring `requestState` bound to the reviewed plan.
-3. An accepted response creates the same short-lived local one-shot approval grant used by the v1 terminal workflow, then applies the exact reviewed plan.
-4. Replaying the same accepted approval after the grant has been consumed is rejected.
-5. Destructive/high-risk approval requires the plan-specific `DELETE-XXXXXX` phrase; medium-risk approval requires `PUBLISH`.
-6. Legacy MCP 2025-11-25 stdio clients that advertise elicitation receive an `elicitation/create` request while the tool call is pending.
-7. Legacy clients without elicitation support fall back to the stable terminal `gitmake approve` workflow.
-8. `server/discover` advertises the modern protocol/tool capability surface.
+- `scripts/e2e.sh` — PASS (`ALL_E2E_PASS`)
+- `scripts/e2e_v0100.sh` — PASS (`V0100_GUIDED_UX_E2E_PASS`)
+- `scripts/e2e_v100.sh` — PASS (`V100_TOKENLESS_STABILITY_E2E_PASS`)
+- `scripts/e2e_v110.sh` — PASS (`V110_CHAT_APPROVAL_E2E_PASS`)
+- `scripts/e2e_v120.sh` — PASS (`V120_ONE_SHOT_PUBLISH_E2E_PASS`)
+- `scripts/e2e_v121.sh` — PASS (`V121_PROTOCOL_ROUTING_E2E_PASS`)
 
-## Current compatibility regressions
+The v1.2.1 E2E specifically initializes a client as MCP `2026-07-28` with elicitation capability and then calls `gitmake_publish`. The response must be the modern `input_required` result tied to the original tool call; a legacy `elicitation/create` server request fails the test.
 
-- `scripts/e2e_v100.sh` — **V100_TOKENLESS_STABILITY_E2E_PASS**
-- `scripts/e2e_v0100.sh` — **V0100_GUIDED_UX_E2E_PASS**
-- `scripts/e2e_v090.sh` — **V090_SIMPLE_ZERO_CONFIG_E2E_PASS**
-- `scripts/e2e_v080.sh` — **V080_FOLDER_E2E_PASS** and **V073_SAFETY_E2E_PASS**
+## Historical harness cleanup
 
-Historical pre-v1 fixtures that explicitly assert superseded token-copy approval wording are not used as current compatibility gates. The frozen v1 contract is covered by the v1.0+ regression suites above.
+`e2e_v04.sh` and `e2e_v05.sh` contained obsolete assertions that required the executable version to be exactly `1.0.0`, which made those historical behavior suites fail on every later valid v1 release. They now test the stable v1 version/schema shape instead. Both suites pass after the cleanup.
 
-## Approval / trust model
+## Safety invariants retained
 
-v1.1 adds a new **approval transport**, not a weaker approval class:
+- reviewed immutable plan before mutation
+- client-controlled human approval
+- medium risk requires `PUBLISH`
+- destructive/high risk requires plan-specific `DELETE-XXXXXX`
+- exact source/config/remote revalidation
+- short-lived single-use approval grants
+- project identity and managed-sync protections
+- plan/repository mutation locks
+- no force push
+- no history rewrite
+- no repository deletion
 
-- Preferred: approval inside an elicitation-capable MCP client.
-- Fallback: terminal `gitmake approve`.
-- Both paths create a short-lived, local, plan-bound, single-use grant.
-- The model cannot mint a GitMake grant through a normal GitMake tool.
-- A consumed grant cannot be re-minted for the same reviewed plan; another mutation requires a fresh plan.
-- Destructive operations retain stronger typed confirmation.
-
-Client-side automation is part of the trust boundary: if the MCP client is configured with an `Elicitation` hook that auto-accepts requests, that client configuration can intentionally skip the visible human dialog. GitMake does not treat the model itself as approval, but it must trust the MCP client's elicitation result.
-
-## Concurrency / recovery hardening retained from v1
-
-Unit coverage passes for:
-
-- plan/repository operation locking
-- lock replay/reacquisition behavior
-- apply operation journal creation/finish/recovery records
-- approval expiry, binding, one-shot behavior, consumed-grant replay protection, and cleanup
-- expired plan/approval/lock/journal housekeeping
-
-Apply retries revalidate the reviewed plan before mutation instead of blindly resuming stale state.
-
-## Performance regression guard
-
-`BenchmarkHashThousandSmallFiles` (`go test ./internal/foldersource -run '^$' -bench '^BenchmarkHashThousandSmallFiles$' -benchtime=3x -count=1`):
-
-- Linux amd64 test environment
-- 1,000 small files
-- approximately **21.0 ms/op** in this run
-
-This is a regression guard, not a product performance guarantee. Results can vary with filesystem cache and host load; v1.1 does not introduce speculative performance changes.
-
-## Release build target matrix
+## Cross-platform build targets
 
 Release packaging targets:
 
-- Windows amd64 — `gitmake.exe` + `GitMake-Setup.exe`
+- Windows amd64 (`gitmake.exe` + `GitMake-Setup.exe`)
 - Linux amd64
-- Linux arm64 (Raspberry Pi 4/5 and other 64-bit ARM Linux)
+- Linux arm64
 - macOS amd64
 - macOS arm64
 
-## Stable safety invariants
-
-v1.1 preserves the frozen v1 safety contract:
-
-- no force push
-- no Git history rewrite
-- no repository deletion
-- managed sync / protected paths
-- secret scan + large-file/LFS preflight
-- project identity binding
-- branch protection / tag conflict checks
-- immutable plan stale revalidation
-- local, single-use human approval grants
-- destructive mass-deletion gate
-- folder snapshot symlink / unsafe-path / case-collision defenses
-- same-plan / same-repository concurrent mutation locks
-
-## Build verification
-
-Cross-builds completed successfully for all release targets. The native Linux amd64 binary reports `gitmake 1.1.0`; cross-built binaries were verified by executable format inspection.
+All are built with `CGO_ENABLED=0` for the release bundle.

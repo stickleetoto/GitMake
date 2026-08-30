@@ -1,6 +1,6 @@
 # GitMake v1 Stability Contract
 
-GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 adds MCP chat approval as an optional, backward-compatible approval transport.
+GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 added MCP chat approval as an optional, backward-compatible approval transport. v1.2.0 added `gitmake_publish` as a new high-level orchestration tool without changing the frozen lower-level interfaces. v1.2.1 hardens protocol routing and approval-state validation without changing those interfaces.
 
 ## Stable through v1.x
 
@@ -13,6 +13,7 @@ GitMake v1.x will preserve these interfaces unless a security issue makes a brea
 - Project identity: `gitmake.project/v1`.
 - Managed-sync metadata semantics and protected-path behavior.
 - MCP tool names already shipped in v1.0, especially `gitmake_prepare` and `gitmake_apply`.
+- `gitmake_publish` is additive in v1.2 and composes the frozen prepare/approval/apply semantics rather than replacing them.
 - `gitmake_apply` requires only `plan_id` in the v1 tokenless approval flow. A legacy pre-1.0 `approval_token` remains optional for compatibility.
 - Safety invariants: no force push, no history rewriting, no repository deletion, no silent project retargeting, and no automatic bypass of protected branches or destructive-change gates.
 

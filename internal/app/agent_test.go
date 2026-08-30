@@ -14,7 +14,7 @@ func TestReplaceManagedSectionPreservesUserContent(t *testing.T) {
 	if strings.Count(got, agentsBegin) != 1 || strings.Count(got, agentsEnd) != 1 {
 		t.Fatalf("managed section should be unique: %q", got)
 	}
-	if !strings.Contains(got, "gitmake --dry-run --read-only --json") {
+	if !strings.Contains(got, "gitmake_publish") {
 		t.Fatalf("new managed instructions missing: %q", got)
 	}
 }

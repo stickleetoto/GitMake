@@ -90,9 +90,19 @@ func (s *mcpServer) serve(in io.Reader, out io.Writer) error {
 		// Legacy (2025-11-25) stdio clients support elicitation as a
 		// server-to-client request while the original tool call is pending.
 		// Handle that flow here because it temporarily owns the input stream.
-		if !isNotification && req.Method == "tools/call" && s.legacyElicitation {
+		if !isNotification && req.Method == "tools/call" && s.legacyProtocol == mcpProtocolLegacy && s.legacyElicitation {
 			var p mcpToolCallParams
 			if json.Unmarshal(req.Params, &p) == nil {
+				if p.Name == "gitmake_publish" && s.allowWrite {
+					resp, err := s.legacyPublishWithElicitation(req, p, scanner, enc)
+					if err != nil {
+						return err
+					}
+					if err := enc.Encode(resp); err != nil {
+						return fmt.Errorf("write MCP response: %w", err)
+					}
+					continue
+				}
 				if _, ok := s.legacyShouldElicit(p); ok {
 					resp, err := s.legacyApplyWithElicitation(req, p, scanner, enc)
 					if err != nil {
@@ -138,12 +148,13 @@ func (s *mcpServer) handle(req mcpRequest) (mcpResponse, bool) {
 			protocol = mcpProtocolLegacy
 		}
 		s.legacyProtocol = protocol
-		_, s.legacyElicitation = p.Capabilities["elicitation"]
+		_, hasElicitation := p.Capabilities["elicitation"]
+		s.legacyElicitation = protocol == mcpProtocolLegacy && hasElicitation
 		base.Result = map[string]any{
 			"protocolVersion": protocol,
 			"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":      map[string]any{"name": "gitmake", "version": Version},
-			"instructions":    "Use gitmake_prepare for normal publish planning. When gitmake_apply needs human approval, GitMake can request it through MCP elicitation in clients that support it; otherwise the fallback is `gitmake approve` in a terminal.",
+			"instructions":    "For normal publish/upload/create/update requests, use gitmake_publish first. It orchestrates prepare, client-controlled human approval, apply, and final result in one interactive MCP operation. Use gitmake_prepare only when the user explicitly wants a plan without publishing. Terminal `gitmake approve` remains the fallback for clients without elicitation.",
 		}
 		return base, true
 	case "server/discover":
@@ -152,7 +163,7 @@ func (s *mcpServer) handle(req mcpRequest) (mcpResponse, bool) {
 			"supportedVersions": []string{mcpProtocolModern, mcpProtocolLegacy},
 			"capabilities":      map[string]any{"tools": map[string]any{"listChanged": false}},
 			"serverInfo":        map[string]any{"name": "gitmake", "version": Version},
-			"instructions":      "Use gitmake_prepare as the primary entry point. gitmake_apply uses client-controlled MCP elicitation for human approval when supported, with terminal approval as a fallback.",
+			"instructions":      "Use gitmake_publish as the primary publishing entry point. It keeps planning, human approval, and apply inside one interactive MCP operation. Use gitmake_prepare when the user explicitly asks for plan-only review. Terminal approval remains a compatibility fallback.",
 		}
 		return base, true
 	case "notifications/initialized", "notifications/cancelled":
@@ -177,6 +188,21 @@ func (s *mcpServer) handle(req mcpRequest) (mcpResponse, bool) {
 			return base, true
 		}
 		modern := s.isModernRequest(req.Params)
+		if modern && p.Name == "gitmake_publish" && (s.requestSupportsElicitation(req.Params) || len(p.InputResponses) > 0) {
+			result, inputRequired, handled, err := s.modernPublishResult(p)
+			if handled {
+				if err != nil {
+					resp := s.toolErrorResponse(base, err, true)
+					return resp, true
+				}
+				if inputRequired != nil {
+					base.Result = inputRequired
+					return base, true
+				}
+				resp := s.toolSuccessResponse(base, result, true)
+				return resp, true
+			}
+		}
 		if modern && p.Name == "gitmake_apply" && (s.requestSupportsElicitation(req.Params) || len(p.InputResponses) > 0) {
 			result, inputRequired, handled, err := s.modernApplyResult(p)
 			if handled {
@@ -211,7 +237,7 @@ func (s *mcpServer) tools() []mcpTool {
 	zipArg := map[string]any{"type": "string", "description": "Deprecated alias for source_path when the source is a ZIP."}
 	tools := []mcpTool{
 		{Name: "gitmake_describe", Description: "Return GitMake's machine-readable AI capability manifest.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
-		{Name: "gitmake_prepare", Description: "PRIMARY ENTRY POINT. High-level folder-or-ZIP to reviewed-plan workflow. Infer the source mode, validate config, run ignore/snapshot/security/preflight/project-identity checks, and create a reviewed plan. Use this tool when the user asks to prepare or publish a project. In read-only MCP mode, missing config stays in memory; with --allow-write it is persisted atomically by GitMake. Do NOT create or edit gitmake.json with host filesystem Write/Edit tools when this tool is available.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_path": sourceArg, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json through GitMake's validated atomic writer. Defaults to false. Set true only when the user explicitly wants a persistent advanced gitmake.json."}})},
+		{Name: "gitmake_prepare", Description: "PLAN-ONLY ENTRY POINT. High-level folder-or-ZIP to reviewed-plan workflow. Use this when the user explicitly wants to inspect or prepare a plan without publishing. For actual upload/publish/create/update requests, prefer gitmake_publish so GitMake can keep planning, human approval, apply, and completion in one interactive MCP operation. Do NOT create or edit gitmake.json with host filesystem Write/Edit tools when this tool is available.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_path": sourceArg, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json through GitMake's validated atomic writer. Defaults to false. Set true only when the user explicitly wants a persistent advanced gitmake.json."}})},
 		{Name: "gitmake_project_inspect", Description: "Inspect project config and ZIP discovery state without shell commands or project mutation.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_doctor", Description: "Diagnose Git, GitHub CLI, authentication, identity, installation, and project config without mutating the project.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
 		{Name: "gitmake_discover", Description: "Classify ZIP archives conservatively and identify likely project source/release assets without changing files.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir})},
@@ -226,6 +252,7 @@ func (s *mcpServer) tools() []mcpTool {
 		configObj := map[string]any{"type": "object", "description": "A complete GitMake config object that conforms to gitmake_config_schema."}
 		patchObj := map[string]any{"type": "object", "description": "RFC 7396-style object merge patch for the existing config."}
 		tools = append(tools,
+			mcpTool{Name: "gitmake_publish", Description: "PRIMARY PUBLISHING TOOL. When the user asks to upload, publish, create, update, or release a GitHub project, call this tool first. It performs prepare -> reviewed plan -> client-controlled human approval -> exact-plan revalidation -> apply -> final result in ONE interactive MCP operation. Do NOT stop the conversation merely to ask the user for approval; GitMake will request approval through the MCP client UI. If the client cannot provide MCP elicitation, use gitmake_prepare + terminal `gitmake approve` + gitmake_apply as the fallback. Never bypass GitMake with raw git/gh/GitHub API.", InputSchema: objectSchema(nil, map[string]any{"project_dir": projectDir, "source_path": sourceArg, "source_zip": zipArg, "persist_config": map[string]any{"type": "boolean", "description": "Persist an inferred missing gitmake.json before publishing. Defaults to false."}})},
 			mcpTool{Name: "gitmake_config_write", Description: "Validate and atomically write gitmake.json. Prefer this over direct file editing.", InputSchema: objectSchema([]string{"config"}, map[string]any{"project_dir": projectDir, "config": configObj})},
 			mcpTool{Name: "gitmake_config_patch", Description: "Validate and atomically patch an existing gitmake.json.", InputSchema: objectSchema([]string{"patch"}, map[string]any{"project_dir": projectDir, "patch": patchObj})},
 			mcpTool{Name: "gitmake_apply", Description: "Apply one reviewed plan. If the connected MCP client supports elicitation, GitMake requests human approval inside the client UI and only proceeds after the client returns an accepted human response. Otherwise the stable fallback is local `gitmake approve`. GitMake revalidates the exact plan binding and keeps approval single-use. A legacy approval_token is accepted only for pre-1.0 compatibility.", InputSchema: objectSchema([]string{"plan_id"}, map[string]any{"project_dir": projectDir, "plan_id": map[string]any{"type": "string", "pattern": "^gm_[A-Za-z0-9]+$"}, "approval_token": map[string]any{"type": "string", "description": "Deprecated pre-1.0 compatibility token.", "pattern": "^gma_[A-Fa-f0-9]+$"}})},
@@ -394,6 +421,11 @@ func (s *mcpServer) callTool(name string, args map[string]any) (any, error) {
 			return result, fmt.Errorf("apply succeeded but local approval could not be consumed: %w", err)
 		}
 		return result, nil
+	case "gitmake_publish":
+		if !s.allowWrite {
+			return nil, fmt.Errorf("MCP write tools are disabled; restart with `gitmake mcp --allow-write`")
+		}
+		return nil, fmt.Errorf("gitmake_publish requires an MCP client with interactive elicitation; use gitmake_prepare, then `gitmake approve`, then gitmake_apply as the compatibility fallback")
 	default:
 		return nil, fmt.Errorf("unknown tool %q", name)
 	}
