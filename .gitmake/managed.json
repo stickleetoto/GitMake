@@ -66,6 +66,7 @@
     "internal/history/history.go",
     "internal/installer/install_other.go",
     "internal/installer/install_windows.go",
+    "internal/installer/install_windows.go.tmp",
     "internal/installer/status.go",
     "internal/installer/status_test.go",
     "internal/opjournal/journal.go",
@@ -87,6 +88,9 @@
     "internal/upgrader/replace_windows.go",
     "internal/upgrader/upgrader.go",
     "internal/upgrader/upgrader_test.go",
+    "internal/winreplace/replace_windows.go",
+    "internal/winreplace/script.go",
+    "internal/winreplace/script_test.go",
     "scripts/e2e.sh",
     "scripts/e2e_v0100.sh",
     "scripts/e2e_v03.sh",
@@ -104,6 +108,7 @@
     "scripts/e2e_v100.sh",
     "scripts/e2e_v110.sh",
     "scripts/e2e_v120.sh",
-    "scripts/e2e_v121.sh"
+    "scripts/e2e_v121.sh",
+    "scripts/e2e_v123.sh"
   ]
 }

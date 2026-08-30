@@ -1,3 +1,11 @@
+## v1.2.3 — Locked-Executable Recovery
+
+- Fixed Windows install/update replacement when the installed `gitmake.exe` is held open by a long-lived GitMake process such as an MCP stdio server.
+- Added a detached replacement helper that waits for the invoking GitMake process to exit, stops only GitMake processes whose executable path exactly matches the installed target, then retries replacement for transient antivirus/indexer locks.
+- Installer results now distinguish immediate replacement from staged replacement and expose the helper log path.
+- `gitmake upgrade` now uses the same exact-path replacement helper, preventing a successful download from silently failing to replace a locked executable.
+- Added unit coverage for parent-process waiting, exact-path process scoping, safe PowerShell path quoting, and Windows cross-compilation of installer/upgrader/helper test binaries.
+
 ## v1.2.2 — Authless Self-Upgrade
 
 ### Fixed

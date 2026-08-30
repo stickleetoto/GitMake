@@ -14,45 +14,56 @@ import (
 const profileBegin = "# >>> GitMake PATH >>>"
 const profileEnd = "# <<< GitMake PATH <<<"
 
-func InstallSelf() (string, bool, error) {
+func InstallSelf() (InstallResult, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return "", false, fmt.Errorf("locate GitMake executable: %w", err)
+		return InstallResult{}, err
 	}
-	return installFrom(exe)
-}
-
-func InstallSibling(name string) (string, bool, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", false, err
-	}
-	src := filepath.Join(filepath.Dir(exe), name)
-	return installFrom(src)
-}
-
-func installFrom(src string) (string, bool, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", false, err
+		return InstallResult{}, err
 	}
 	dir := filepath.Join(home, ".local", "bin")
-	target := filepath.Join(dir, "gitmake")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", false, err
+		return InstallResult{}, err
 	}
-	srcAbs, _ := filepath.Abs(src)
-	targetAbs, _ := filepath.Abs(target)
-	if !samePath(srcAbs, targetAbs, false) {
-		if err := copyExecutable(srcAbs, targetAbs); err != nil {
-			return "", false, err
-		}
+	target := filepath.Join(dir, "gitmake")
+	if err := copyExecutable(exe, target); err != nil {
+		return InstallResult{}, err
 	}
-	changed, err := ensureProfilePATH(home, dir)
+	added, err := ensureProfilePATH(home, dir)
 	if err != nil {
-		return target, false, err
+		return InstallResult{}, err
 	}
-	return target, changed, nil
+	return InstallResult{Target: target, PathAdded: added}, nil
+}
+
+func InstallSibling(name string) (InstallResult, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return InstallResult{}, err
+	}
+	sibling := filepath.Join(filepath.Dir(exe), name)
+	if _, err := os.Stat(sibling); err != nil {
+		return InstallResult{}, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return InstallResult{}, err
+	}
+	dir := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return InstallResult{}, err
+	}
+	target := filepath.Join(dir, "gitmake")
+	if err := copyExecutable(sibling, target); err != nil {
+		return InstallResult{}, err
+	}
+	added, err := ensureProfilePATH(home, dir)
+	if err != nil {
+		return InstallResult{}, err
+	}
+	return InstallResult{Target: target, PathAdded: added}, nil
 }
 
 func copyExecutable(src, dst string) error {

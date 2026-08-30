@@ -9,6 +9,19 @@ import (
 // resolution state. Keeping these signals separate prevents false negatives
 // when the registry/user PATH is correct but the current process environment
 // is stale (or when exec.LookPath behaves differently from PowerShell).
+
+// InstallResult describes the outcome of installing or replacing GitMake.
+// ReplacementStaged means Windows could not replace the currently-installed
+// executable immediately (usually because an MCP process had it open), so a
+// detached helper will finish the exact-path replacement after this process
+// exits.
+type InstallResult struct {
+	Target            string
+	PathAdded         bool
+	ReplacementStaged bool
+	ReplacementLog    string
+}
+
 type PathStatus struct {
 	InstallDir             string
 	InstallTarget          string

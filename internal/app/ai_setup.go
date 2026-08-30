@@ -205,11 +205,14 @@ func runGenericAIStatus(o Options) error {
 
 func stableAIExecutable() (string, error) {
 	if runtime.GOOS == "windows" {
-		target, _, err := installer.InstallSelf()
+		result, err := installer.InstallSelf()
 		if err != nil {
 			return "", fmt.Errorf("prepare GitMake installation for AI setup: %w", err)
 		}
-		return target, nil
+		if result.ReplacementStaged {
+			return "", fmt.Errorf("GitMake replacement is staged because the installed executable is in use; rerun this command after the replacement helper finishes (log: %s)", result.ReplacementLog)
+		}
+		return result.Target, nil
 	}
 	exe, err := os.Executable()
 	if err != nil {

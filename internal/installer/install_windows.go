@@ -8,22 +8,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gitmake/internal/winreplace"
 )
 
 const productDir = "GitMake"
 
-func InstallSelf() (string, bool, error) {
+func InstallSelf() (InstallResult, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return "", false, fmt.Errorf("locate GitMake executable: %w", err)
+		return InstallResult{}, fmt.Errorf("locate GitMake executable: %w", err)
 	}
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
-		return "", false, fmt.Errorf("LOCALAPPDATA is not set")
+		return InstallResult{}, fmt.Errorf("LOCALAPPDATA is not set")
 	}
 	dir := filepath.Join(local, "Programs", productDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", false, fmt.Errorf("create install directory: %w", err)
+		return InstallResult{}, fmt.Errorf("create install directory: %w", err)
 	}
 	target := filepath.Join(dir, "gitmake.exe")
 	// If `gitmake install` is run from the already-installed copy, do not try
@@ -32,74 +34,108 @@ func InstallSelf() (string, bool, error) {
 	if samePath(exe, target, true) {
 		added, err := ensureUserPath(dir)
 		if err != nil {
-			return target, false, err
+			return InstallResult{}, err
 		}
-		return target, added, nil
+		return InstallResult{Target: target, PathAdded: added}, nil
 	}
-	src, err := os.Open(exe)
-	if err != nil {
-		return "", false, fmt.Errorf("open current executable: %w", err)
-	}
-	defer src.Close()
+
 	tmp := target + ".new"
-	dst, err := os.Create(tmp)
+	if err := copyFile(exe, tmp); err != nil {
+		return InstallResult{}, err
+	}
+	staged, logPath, err := replaceOrStageWindows(tmp, target)
 	if err != nil {
-		return "", false, fmt.Errorf("create installed executable: %w", err)
-	}
-	if _, err := dst.ReadFrom(src); err != nil {
-		dst.Close()
 		_ = os.Remove(tmp)
-		return "", false, fmt.Errorf("copy executable: %w", err)
-	}
-	if err := dst.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return "", false, err
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(target)
-		if err2 := os.Rename(tmp, target); err2 != nil {
-			_ = os.Remove(tmp)
-			return "", false, fmt.Errorf("replace installed executable: %w", err2)
-		}
+		return InstallResult{}, err
 	}
 	added, err := ensureUserPath(dir)
 	if err != nil {
-		return target, false, err
+		return InstallResult{}, err
 	}
-	return target, added, nil
+	return InstallResult{
+		Target: target, PathAdded: added, ReplacementStaged: staged, ReplacementLog: logPath,
+	}, nil
 }
 
-func InstallSibling(exePath string) (string, bool, error) {
+func InstallSibling(exePath string) (InstallResult, error) {
 	abs, err := filepath.Abs(exePath)
 	if err != nil {
-		return "", false, err
+		return InstallResult{}, err
 	}
 	local := os.Getenv("LOCALAPPDATA")
 	if local == "" {
-		return "", false, fmt.Errorf("LOCALAPPDATA is not set")
+		return InstallResult{}, fmt.Errorf("LOCALAPPDATA is not set")
 	}
 	dir := filepath.Join(local, "Programs", productDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", false, err
+		return InstallResult{}, err
 	}
 	target := filepath.Join(dir, "gitmake.exe")
-	data, err := os.ReadFile(abs)
-	if err != nil {
-		return "", false, fmt.Errorf("read gitmake.exe beside setup: %w", err)
-	}
 	tmp := target + ".new"
-	if err := os.WriteFile(tmp, data, 0o755); err != nil {
-		return "", false, fmt.Errorf("stage gitmake.exe: %w", err)
+	if err := copyFile(abs, tmp); err != nil {
+		return InstallResult{}, fmt.Errorf("stage gitmake.exe: %w", err)
 	}
-	if err := os.Rename(tmp, target); err != nil {
-		_ = os.Remove(target)
-		if err2 := os.Rename(tmp, target); err2 != nil {
-			_ = os.Remove(tmp)
-			return "", false, fmt.Errorf("install gitmake.exe: %w", err2)
-		}
+	staged, logPath, err := replaceOrStageWindows(tmp, target)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return InstallResult{}, fmt.Errorf("install gitmake.exe: %w", err)
 	}
 	added, err := ensureUserPath(dir)
-	return target, added, err
+	if err != nil {
+		return InstallResult{}, err
+	}
+	return InstallResult{
+		Target: target, PathAdded: added, ReplacementStaged: staged, ReplacementLog: logPath,
+	}, nil
+}
+
+func copyFile(source, target string) error {
+	src, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open current executable: %w", err)
+	}
+	defer src.Close()
+	dst, err := os.Create(target)
+	if err != nil {
+		return fmt.Errorf("create staged executable: %w", err)
+	}
+	if _, err := dst.ReadFrom(src); err != nil {
+		_ = dst.Close()
+		_ = os.Remove(target)
+		return fmt.Errorf("copy executable: %w", err)
+	}
+	if err := dst.Close(); err != nil {
+		_ = os.Remove(target)
+		return fmt.Errorf("close staged executable: %w", err)
+	}
+	return nil
+}
+
+func replaceOrStageWindows(tmp, target string) (bool, string, error) {
+	// Fast path for a first install where no target exists.
+	if _, err := os.Stat(target); os.IsNotExist(err) {
+		if err := os.Rename(tmp, target); err == nil {
+			return false, "", nil
+		}
+	}
+
+	// Windows will not replace a running executable. Try the immediate path
+	// first; if an MCP/CLI process has the installed binary open, preserve the
+	// staged .new file and let a detached exact-path helper finish after exit.
+	removeErr := os.Remove(target)
+	if removeErr == nil || os.IsNotExist(removeErr) {
+		if err := os.Rename(tmp, target); err == nil {
+			return false, "", nil
+		}
+	}
+	logPath, err := winreplace.Stage(tmp, target, os.Getpid())
+	if err != nil {
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return false, "", fmt.Errorf("replace installed executable (target is locked: %v; helper failed: %w)", removeErr, err)
+		}
+		return false, "", fmt.Errorf("replace installed executable: %w", err)
+	}
+	return true, logPath, nil
 }
 
 func ensureUserPath(dir string) (bool, error) {

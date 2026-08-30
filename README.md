@@ -1,4 +1,4 @@
-# GitMake v1.2.2
+# GitMake v1.2.3
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -18,7 +18,7 @@ optional Release + assets
 
 v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow. In elicitation-capable MCP clients, the new `gitmake_publish` tool performs prepare → reviewed plan → human approval → exact-plan revalidation → apply → final result as one interactive MCP operation. Agents no longer need to stop the chat between `gitmake_prepare` and `gitmake_apply`. Existing `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, schemas, safety gates, and approval semantics remain backward compatible.
 
-v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardens self-upgrade: `gitmake upgrade` now checks public GitHub Releases directly over HTTPS instead of requiring `gh auth`, preserves SHA-256 verification, and refuses accidental downgrades when the local version is newer than the latest published release.
+v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardened self-upgrade by using public GitHub Releases over anonymous HTTPS, preserving SHA-256 verification, and refusing accidental downgrades. v1.2.3 hardens Windows executable replacement: if the installed `gitmake.exe` is locked by an MCP/CLI process, GitMake stages an exact-path replacement helper instead of failing with a generic `Access is denied`.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -66,7 +66,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.2
+GitMake 1.2.3
 
 testuser/GambleLM
 Update · public

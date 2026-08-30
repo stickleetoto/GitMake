@@ -23,7 +23,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.2"
+const Version = "1.2.3"
 
 type Options struct {
 	Command       string
@@ -506,13 +506,23 @@ func runInit(o Options) error {
 
 func runInstall() error {
 	fmt.Printf("GitMake %s · Install\n\n", Version)
-	target, added, err := installer.InstallSelf()
+	result, err := installer.InstallSelf()
 	if err != nil {
 		return err
 	}
-	fmt.Println("✓ Installed")
-	fmt.Println("  " + target)
-	if added {
+	if result.ReplacementStaged {
+		fmt.Println("✓ Replacement staged")
+		fmt.Println("  " + result.Target)
+		fmt.Println("  The installed GitMake executable is currently in use.")
+		fmt.Println("  After this command closes, GitMake will stop only processes using that exact installed executable and finish replacement.")
+		if result.ReplacementLog != "" {
+			fmt.Println("  Helper log: " + result.ReplacementLog)
+		}
+	} else {
+		fmt.Println("✓ Installed")
+		fmt.Println("  " + result.Target)
+	}
+	if result.PathAdded {
 		fmt.Println("✓ Added to your user PATH")
 		fmt.Println("\nOpen a new PowerShell/Terminal window, then run:\n  gitmake doctor")
 	} else {

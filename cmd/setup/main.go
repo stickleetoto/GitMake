@@ -23,14 +23,22 @@ func main() {
 	if _, err := os.Stat(sibling); err != nil {
 		fail(fmt.Errorf("gitmake.exe must be beside GitMake-Setup.exe"))
 	}
-	target, added, err := installer.InstallSibling(sibling)
+	result, err := installer.InstallSibling(sibling)
 	if err != nil {
 		fail(err)
 	}
+	target := result.Target
 
 	fmt.Println("Install")
-	fmt.Println("✓ GitMake CLI       " + target)
-	if added {
+	if result.ReplacementStaged {
+		fmt.Println("✓ GitMake CLI       replacement staged · " + target)
+		if result.ReplacementLog != "" {
+			fmt.Println("· Replacement log  " + result.ReplacementLog)
+		}
+	} else {
+		fmt.Println("✓ GitMake CLI       " + target)
+	}
+	if result.PathAdded {
 		fmt.Println("✓ User PATH         added (new terminals will pick it up)")
 	} else {
 		fmt.Println("✓ User PATH         already configured")

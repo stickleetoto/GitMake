@@ -1,4 +1,4 @@
-GitMake v1.2.2 + AI/MCP
+GitMake v1.2.3 + AI/MCP
 
 ONE-CLICK CLAUDE SETUP
   gitmake ai setup

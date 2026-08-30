@@ -1,38 +1,27 @@
-# GitMake v1.2.2 Test Report
+# GitMake v1.2.3 Test Report
 
-## Result
+**PASS** for the Locked-Executable Recovery patch.
 
-**PASS** for the v1.2.2 Authless Self-Upgrade patch.
+## Core regression
 
-## Core verification
+- `go test ./...` — PASS
+- `go vet ./...` — PASS
+- `go test -race ./...` — PASS
 
-```text
-go test ./...        PASS
-go vet ./...         PASS
-go test -race ./...  PASS
-```
+## Publishing / MCP regression
 
-## Regression verification
+- v1.0 guided/stability E2E — PASS
+- v1.1 chat approval E2E — PASS
+- v1.2 one-shot publish E2E — PASS
+- v1.2.1 protocol routing E2E — PASS
+- v1.2.3 locked-executable recovery E2E — PASS
 
-```text
-V0100_GUIDED_UX_E2E_PASS
-V100_TOKENLESS_STABILITY_E2E_PASS
-V110_CHAT_APPROVAL_E2E_PASS
-V120_ONE_SHOT_PUBLISH_E2E_PASS
-V121_PROTOCOL_ROUTING_E2E_PASS
-```
+## v1.2.3 replacement coverage
 
-## v1.2.2 updater coverage
+- replacement script waits for the creating parent PID before touching the installed executable;
+- process termination is scoped to exact executable-path equality;
+- broad image-name termination (`taskkill /IM gitmake.exe`) is explicitly absent;
+- PowerShell single-quote escaping is unit-tested;
+- installer, upgrader, and replacement-helper Windows amd64 test binaries cross-compile successfully.
 
-The updater tests verify that:
-
-- public release discovery uses HTTPS without an Authorization header;
-- release asset download works through the public release path;
-- non-HTTPS or non-GitHub download hosts are rejected;
-- SHA-256 package verification still rejects tampering;
-- semantic version comparison handles patch/minor/major ordering;
-- when the local version is newer than the latest published release, no asset download is attempted.
-
-## Scope note
-
-In-place self-replacement remains Windows x64 only. Linux and macOS release packages are still built for manual installation.
+A live Windows file-lock execution test cannot run in the Linux packaging environment; the Windows-specific path is validated by cross-compilation plus script-generation unit tests and should be smoke-tested on the target Windows machine before publishing.
