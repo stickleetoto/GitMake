@@ -1,3 +1,13 @@
+## v1.2.4 — Respawn-Safe Replacement
+
+- Fixed a Windows replacement race where an MCP host could automatically respawn the installed GitMake after the helper stopped it, relocking `gitmake.exe` before the next retry.
+- Exact-path GitMake process eviction now runs before every replacement attempt rather than only once.
+- Manual `install`/setup launched from a downloaded executable now performs locked-target replacement synchronously, so success is reported only after the installed file has actually been replaced.
+- Added a short `Wait-Process` synchronization after forced termination so Windows image/file handles can close before remove/move.
+- Increased retry cadence to 250 ms while keeping the overall recovery window at roughly one minute.
+- Preserved the exact-path safety boundary: GitMake instances running from Downloads or any other path are not terminated.
+- Added regression coverage proving process eviction occurs inside the retry loop before each move attempt.
+
 ## v1.2.3 — Locked-Executable Recovery
 
 - Fixed Windows install/update replacement when the installed `gitmake.exe` is held open by a long-lived GitMake process such as an MCP stdio server.

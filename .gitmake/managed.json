@@ -109,6 +109,7 @@
     "scripts/e2e_v110.sh",
     "scripts/e2e_v120.sh",
     "scripts/e2e_v121.sh",
-    "scripts/e2e_v123.sh"
+    "scripts/e2e_v123.sh",
+    "scripts/e2e_v124.sh"
   ]
 }

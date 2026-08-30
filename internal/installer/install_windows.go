@@ -128,6 +128,23 @@ func replaceOrStageWindows(tmp, target string) (bool, string, error) {
 			return false, "", nil
 		}
 	}
+	// When install/setup is running from Downloads (or any executable other
+	// than the installed target), complete replacement synchronously. This
+	// gives the user a truthful success result and prevents MCP auto-respawn
+	// from winning an asynchronous race after the install command returns.
+	if current, currentErr := os.Executable(); currentErr == nil && !samePath(current, target, true) {
+		logPath, syncErr := winreplace.ReplaceNow(tmp, target)
+		if syncErr == nil {
+			return false, logPath, nil
+		}
+		if removeErr != nil && !os.IsNotExist(removeErr) {
+			return false, logPath, fmt.Errorf("replace installed executable (target is locked: %v; synchronous helper failed: %w)", removeErr, syncErr)
+		}
+		return false, logPath, fmt.Errorf("replace installed executable: %w", syncErr)
+	}
+
+	// Self-upgrade from the installed executable cannot replace its own image
+	// synchronously on Windows, so preserve the detached-after-exit path.
 	logPath, err := winreplace.Stage(tmp, target, os.Getpid())
 	if err != nil {
 		if removeErr != nil && !os.IsNotExist(removeErr) {

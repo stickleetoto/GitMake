@@ -1,6 +1,6 @@
-# GitMake v1.2.3 Test Report
+# GitMake v1.2.4 Test Report
 
-**PASS** for the Locked-Executable Recovery patch.
+**PASS** for the Respawn-Safe Replacement patch.
 
 ## Core regression
 
@@ -15,13 +15,15 @@
 - v1.2 one-shot publish E2E — PASS
 - v1.2.1 protocol routing E2E — PASS
 - v1.2.3 locked-executable recovery E2E — PASS
+- v1.2.4 respawn-safe replacement E2E — PASS
 
-## v1.2.3 replacement coverage
+## v1.2.4 replacement coverage
 
-- replacement script waits for the creating parent PID before touching the installed executable;
-- process termination is scoped to exact executable-path equality;
-- broad image-name termination (`taskkill /IM gitmake.exe`) is explicitly absent;
-- PowerShell single-quote escaping is unit-tested;
+- exact-target process eviction occurs inside the replacement retry loop;
+- process termination is still scoped to exact executable-path equality;
+- `Wait-Process` synchronization runs before replacement to allow handle release;
+- downloaded/manual install uses the synchronous replacement path while installed-copy self-upgrade retains detached replacement;
+- broad image-name termination (`taskkill /IM gitmake.exe`) remains explicitly absent;
 - installer, upgrader, and replacement-helper Windows amd64 test binaries cross-compile successfully.
 
-A live Windows file-lock execution test cannot run in the Linux packaging environment; the Windows-specific path is validated by cross-compilation plus script-generation unit tests and should be smoke-tested on the target Windows machine before publishing.
+A live Windows lock/respawn execution test cannot run in the Linux packaging environment; the target-machine smoke test remains the final platform check.
