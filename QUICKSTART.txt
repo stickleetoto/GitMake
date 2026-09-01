@@ -1,7 +1,7 @@
-GitMake v1.2.5 - QUICK START
+GitMake v1.2.6 - QUICK START
 
 INSTALL
-1. Extract GitMake_v1.2.5_Windows_x64.zip.
+1. Extract GitMake_v1.2.6_Windows_x64.zip.
 2. Run GitMake-Setup.exe.
 3. GitMake checks Git, GitHub CLI/login, and optionally connects Claude Code MCP.
 

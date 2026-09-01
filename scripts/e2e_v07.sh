@@ -50,6 +50,8 @@ echo "fake gh unsupported: $*" >&2; exit 2
 GH
 chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH" FAKE_GH_ROOT="$TMP/remotes" GIT_CONFIG_GLOBAL="$TMP/gitconfig"
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+require_fake_gh "$BIN"
 git config --global user.name "GitMake V07"
 git config --global user.email "v07@example.test"
 

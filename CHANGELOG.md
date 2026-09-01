@@ -1,3 +1,63 @@
+## v1.2.6 — Self-Upgrade Actually Replaces the Executable
+
+### Root cause
+
+The deferred Windows replacement helper added in v1.2.3 was started with the `DETACHED_PROCESS` creation flag. `powershell.exe` is a console subsystem application: with no console attached it exits immediately with status `0` **without executing the `-File` script**. `cmd.Start()` succeeded, the exit code looked clean, and GitMake printed `✓ Upgrade staged` — while the helper had never run a single line.
+
+Every staged replacement from v1.2.3 through v1.2.5 was therefore a silent no-op. The retry loops, exact-path process eviction, and respawn-race hardening added across those releases were never executed even once. The existing tests only asserted on the *text* of the generated PowerShell script, so they could not observe it.
+
+The synchronous installer path (`ReplaceNow`) did not set that flag, which is exactly why installing from a downloaded copy worked while `gitmake upgrade` never did.
+
+### Fixed
+
+- **Self-upgrade now replaces the executable.** Replacement is performed in process with a rename-aside sequence: the current executable is renamed (which Windows permits on a running image, unlike delete or overwrite), the verified new executable is moved into the canonical path, and only then is the displaced file removed. The result is confirmed on disk before `gitmake upgrade` returns.
+- **No process is stopped for an upgrade.** MCP stdio servers still running the old build keep running from the renamed file until they exit, so an MCP host that auto-respawns can no longer block replacement.
+- **Replacement is never destructive.** The previous executable is no longer deleted before the new one is in place, and a failed attempt restores it. Earlier versions ran `Remove-Item $dst` first, which could leave the install directory with no `gitmake.exe` at all.
+- **Non-ASCII install paths work.** Generated PowerShell helper scripts are written with a UTF-8 BOM. Windows PowerShell 5.1 decodes a BOM-less `-File` script using the system ANSI code page, so on a Korean (or any non-Latin) Windows install every non-ASCII character in the embedded paths was corrupted and the helper failed with `Illegal characters in path`.
+- **The fallback helper proves it started.** When the in-process replacement is refused, `Stage` waits for the helper's first log line before returning, so a helper that never runs is reported as an error instead of a success.
+- **`gitmake upgrade` output is truthful.** It prints `✓ Installed <tag>` only for a replacement that has actually completed, and `· Replacement scheduled after this process exits` with the log path and a verification command otherwise.
+- **The upgraded path is named.** `gitmake upgrade` replaces the executable that was invoked and prints it. When that is not the installed copy on PATH, the output says so instead of letting the user assume the PATH command was updated.
+- **Temporary downloads are cleaned up.** The download directory is removed once replacement completes; it is preserved only when a deferred helper still needs it. Earlier versions leaked roughly 10 MB per upgrade attempt into `%TEMP%` permanently.
+- **`gitmake upgrade` works on Linux and macOS.** The updater previously refused to run anywhere except Windows x64 despite Linux and macOS release builds being published. Platform assets are now selected for windows/amd64, linux/amd64, linux/arm64, darwin/amd64, and darwin/arm64.
+- **GitHub HTTP failures are actionable.** Anonymous rate limiting, proxy blocking, missing releases, and GitHub outages are now distinguished instead of surfacing a bare `GitHub returned HTTP 403`.
+- Brief sharing violations from antivirus or the search indexer are absorbed by a short bounded rename retry.
+- Removed an empty `internal/installer/install_windows.go.tmp` that had been shipped in the source package.
+
+### Tests
+
+The previous suite passed while the updater had never worked once, so the missing coverage was the real defect. Added:
+
+- `TestStagedHelperActuallyRunsTheScript` — launches the helper for real and requires observable evidence that the script executed. Fails against the `DETACHED_PROCESS` flag that caused this bug.
+- `TestReplaceExecutableReplacesAnImageThatIsStillRunning` — installs a real executable, holds it open with a live process, replaces it, and asserts a fresh invocation of the canonical path reports the new version while the holder is still running.
+- `TestUpgradeInstallsTheNewExecutable` — drives the full download → checksum → extract → replace pipeline against a locally built release package and asserts the target reports the new version.
+- `TestUpgradeFailsClosedOnChecksumMismatch` and `TestUpgradeReportsMissingAssetWithoutTouchingTarget` — a rejected package must never modify the install target.
+- `TestReplaceExecutableNeverLeavesTargetMissing` and `TestReplacementNeverDeletesTheTargetFirst` — pin the non-destructive ordering.
+- `TestHelperScriptIsWrittenWithABOM`, `TestStagedHelperReplacesInsideANonASCIIPath`, and `TestReplaceExecutableHandlesSpacesAndNonASCIIPaths` — cover install paths with spaces and Korean characters.
+- `TestDescribeHTTPFailureIsActionable`, `TestPlatformAssetMatchesPublishedReleaseNames`, `TestSweepBackupsRemovesDisplacedImages`, and installer coverage for the non-destructive install path.
+- `scripts/e2e_v126.sh`.
+
+### E2E harness safety
+
+The E2E suites that stub the GitHub CLI put an extensionless `gh` shell script on PATH. Go's `exec.LookPath` resolves commands through `PATHEXT` on Windows and never finds an extensionless file, so on Windows those suites silently fell through to the **real, authenticated `gh`** and published to a real GitHub account instead of the local fake remote.
+
+`scripts/require_fake_gh.sh` now gates every affected suite. It refuses to run where the stub cannot be resolved and, on platforms where it can, asks GitMake itself which `gh` it resolves before any test proceeds. The suites now exit 70 with an explanation rather than operating on a live account.
+
+This also means those suites were never a valid Windows gate. On Windows the runnable gates are `go test ./...`, `e2e_v123.sh`, `e2e_v124.sh`, and `e2e_v126.sh`; the GitHub-dependent suites must be run under Linux, macOS, or WSL.
+
+Historical assertion updated: `e2e_v124.sh` pinned the exact statement order of the old helper script. It now asserts the v1.2.4 contract — exact-path eviction on every retry, no broad image-name termination — plus the v1.2.6 non-destructive ordering, instead of a specific line of PowerShell.
+
+### Repeatable test suite
+
+`go test ./...` was not repeatable. The approval tests isolated their store with `XDG_CACHE_HOME`, which `os.UserCacheDir` only honours on Linux. On Windows and macOS the tests wrote to the developer's real approval store under fixed plan ids, so the consumed-grant markers survived the run: the suite passed exactly once per machine and failed on every later run with `approval for plan gm_tokenless_test was already used`. Between those runs Go's test cache hid it.
+
+The tests now redirect `XDG_CACHE_HOME`, `LocalAppData`, and `HOME` to a scratch directory, so they never touch the real store and pass on repeated runs. This mattered directly: an unrepeatable green suite is what made the updater defect invisible for three releases.
+
+Release metadata is also written with LF endings; the v1.2.5 checksum file could not be checked with `sha256sum -c` when generated on Windows.
+
+### Unchanged
+
+No change to publishing, approval, plan, config, project-identity, or MCP interfaces. Checksum verification remains mandatory, downgrade refusal remains in place, secret scanning remains fail-closed, stdin config remains authoritative and fail-closed, and structured MCP errors are preserved. Process termination, where it still exists in the fallback helper, remains scoped to an exact executable path and now runs only after an attempt has actually failed.
+
 ## v1.2.5 — Real-World Workflow Hardening
 
 - Fixed root `--stdin` publish/preview configuration being parsed as a flag but silently ignored. A complete stdin config is now strictly parsed, validated, applied for the current invocation, and reported as `config.source: "stdin"`.

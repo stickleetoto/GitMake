@@ -1,4 +1,4 @@
-# GitMake v1.2.5
+# GitMake v1.2.6
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -19,6 +19,8 @@ optional Release + assets
 v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow. In elicitation-capable MCP clients, the new `gitmake_publish` tool performs prepare → reviewed plan → human approval → exact-plan revalidation → apply → final result as one interactive MCP operation. Agents no longer need to stop the chat between `gitmake_prepare` and `gitmake_apply`. Existing `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, schemas, safety gates, and approval semantics remain backward compatible.
 
 v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardened self-upgrade by using public GitHub Releases over anonymous HTTPS, preserving SHA-256 verification, and refusing accidental downgrades. v1.2.3 introduced Windows locked-executable recovery. v1.2.4 closed the MCP auto-respawn race during Windows replacement. v1.2.5 is a real-world workflow hardening patch: root `--stdin` configuration is now authoritative and fail-closed, security scan output aggregates every supported finding, MCP tool failures preserve the structured CLI error payload, and `gitmake preview` now returns actionable guidance instead of being mistaken for a source path.
+
+v1.2.6 fixes self-upgrade for real. The deferred replacement helper introduced in v1.2.3 was launched with `DETACHED_PROCESS`, which makes `powershell.exe` exit immediately without running the script, so **every staged replacement from v1.2.3 through v1.2.5 was a silent no-op that still reported success**. Replacement is now performed in process with a rename-aside sequence that Windows permits on a running image, is verified before the command returns, never deletes the current executable before the new one is in place, and no longer needs to stop any process. See [Self-upgrade integrity](#self-upgrade-integrity).
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -66,7 +68,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.5
+GitMake 1.2.6
 
 testuser/GambleLM
 Update · public
@@ -541,7 +543,35 @@ Recent publish/apply audit records include success/failure, repository, mode, ch
 gitmake upgrade
 ```
 
-Upgrade discovery and downloads use the public GitHub Release API over HTTPS and do not require GitHub CLI authentication. Release packages are checked against the matching SHA-256 asset before replacement is staged. GitMake also refuses to replace a newer local build with an older published release.
+Upgrade discovery and downloads use the public GitHub Release API over HTTPS and do not require GitHub CLI authentication. Release packages are checked against the matching SHA-256 asset before anything on disk is touched. GitMake also refuses to replace a newer local build with an older published release.
+
+Since v1.2.6 the replacement itself happens **in process, before the command returns**:
+
+```text
+✓ Downloaded v1.2.6
+✓ SHA-256 verified
+✓ Installed v1.2.6
+  C:\Users\you\AppData\Local\Programs\GitMake\gitmake.exe
+
+Run: gitmake --version
+```
+
+Windows refuses to delete or overwrite the file backing a running image, but it does allow renaming it. GitMake therefore renames the current executable aside, moves the verified new one into the canonical path, and only then removes the displaced file. Nothing is deleted before the replacement is in place, and no process has to be stopped for the upgrade to succeed — including MCP stdio servers still running the old build, which keep running from the renamed file until they exit.
+
+`gitmake upgrade` replaces the executable you actually invoked. If that is not the installed copy on PATH, the result says so rather than letting you assume the PATH command was updated.
+
+In the rare case where the in-process replacement is refused, GitMake falls back to a deferred helper and reports that honestly:
+
+```text
+· Replacement scheduled after this process exits
+  C:\Users\you\AppData\Local\Programs\GitMake\gitmake.exe
+  Log: C:\Users\you\AppData\Local\Temp\gitmake-replace-1234.log
+
+  Verify once this command has closed:
+  "C:\Users\you\AppData\Local\Programs\GitMake\gitmake.exe" --version
+```
+
+GitMake never prints `Installed` for a replacement that has not happened.
 
 ## Machine-readable errors
 

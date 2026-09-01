@@ -24,6 +24,8 @@ chmod +x "$TMP/bin/gh"
 printf '# v1.2.1 routing hardening\n' > "$TMP/project/README.md"
 printf 'print("routing")\n' > "$TMP/project/main.py"
 export PATH="$TMP/bin:$PATH" GIT_CONFIG_GLOBAL="$TMP/gitconfig" XDG_CACHE_HOME="$TMP/cache"
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+require_fake_gh "$BIN"
 git config --global user.name "GitMake V121"
 git config --global user.email "v121@example.test"
 

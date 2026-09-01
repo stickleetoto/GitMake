@@ -8,11 +8,24 @@ import (
 	"os/exec"
 	"path/filepath"
 	"syscall"
+	"time"
 )
 
 const (
-	detachedProcess       = 0x00000008
+	// CREATE_NO_WINDOW hides the helper console without detaching it.
+	//
+	// DETACHED_PROCESS must NOT be used here. powershell.exe is a console
+	// subsystem application: started with DETACHED_PROCESS it has no console to
+	// attach to, and Windows PowerShell exits immediately with code 0 WITHOUT
+	// running the -File script. That silently turned every staged replacement
+	// into a no-op that still looked successful. See
+	// TestStagedHelperActuallyRuns for the regression guard.
+	createNoWindow        = 0x08000000
 	createNewProcessGroup = 0x00000200
+
+	// helperStartTimeout bounds how long Stage waits for proof that the helper
+	// process really began executing the script.
+	helperStartTimeout = 10 * time.Second
 )
 
 func prepare(source, target string, parentPID int) (scriptPath, logPath string, err error) {
@@ -34,10 +47,17 @@ func prepare(source, target string, parentPID int) (scriptPath, logPath string, 
 	}
 	scriptPath = filepath.Join(os.TempDir(), "gitmake-replace-"+token+".ps1")
 	logPath = filepath.Join(os.TempDir(), "gitmake-replace-"+token+".log")
+	// A stale log from an earlier attempt would make the start handshake pass
+	// without the helper ever running.
+	_ = os.Remove(logPath)
 	content := buildPowerShell(scriptSpec{
 		Source: source, Target: target, ParentPID: parentPID, LogPath: logPath,
 	})
-	if err := os.WriteFile(scriptPath, []byte(content), 0o600); err != nil {
+	// Windows PowerShell 5.1 decodes a -File script as the system ANSI code
+	// page unless it starts with a BOM. On a Korean (or any non-Latin) Windows
+	// install that mangles every non-ASCII character in the embedded paths, and
+	// the helper fails with "Illegal characters in path". The BOM forces UTF-8.
+	if err := os.WriteFile(scriptPath, append([]byte(utf8BOM), content...), 0o600); err != nil {
 		return "", "", fmt.Errorf("write replacement helper: %w", err)
 	}
 	return scriptPath, logPath, nil
@@ -69,12 +89,19 @@ func ReplaceNow(source, target string) (string, error) {
 	if err != nil {
 		return logPath, fmt.Errorf("run replacement helper: %w: %s", err, string(out))
 	}
+	// A zero exit code is not proof of work: verify the helper actually ran.
+	if _, statErr := os.Stat(logPath); statErr != nil {
+		return logPath, fmt.Errorf("replacement helper exited without running (no log at %s): %s", logPath, string(out))
+	}
 	return logPath, nil
 }
 
 // Stage schedules a Windows executable replacement after the caller exits.
 // The helper is deliberately path-scoped: it may stop only GitMake processes
 // whose executable path exactly equals target.
+//
+// Stage returns only after the helper has proven it is running, so a caller
+// can never report a staged replacement that silently never started.
 func Stage(source, target string, parentPID int) (string, error) {
 	scriptPath, logPath, err := prepare(source, target, parentPID)
 	if err != nil {
@@ -87,11 +114,31 @@ func Stage(source, target string, parentPID int) (string, error) {
 	cmd.Stderr = nil
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: detachedProcess | createNewProcessGroup,
+		CreationFlags: createNoWindow | createNewProcessGroup,
 	}
 	if err := cmd.Start(); err != nil {
 		_ = os.Remove(scriptPath)
 		return "", fmt.Errorf("start replacement helper: %w", err)
 	}
+	if err := waitForHelperStart(logPath); err != nil {
+		_ = os.Remove(scriptPath)
+		return logPath, err
+	}
 	return logPath, nil
+}
+
+// waitForHelperStart blocks until the helper writes its first log line. The
+// helper logs before it waits for the parent, so this proves the script is
+// executing without waiting for the replacement itself to finish.
+func waitForHelperStart(logPath string) error {
+	deadline := time.Now().Add(helperStartTimeout)
+	for {
+		if st, err := os.Stat(logPath); err == nil && st.Size() > 0 {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("replacement helper did not start within %s (no log at %s)", helperStartTimeout, logPath)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

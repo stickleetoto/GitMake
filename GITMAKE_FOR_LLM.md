@@ -95,7 +95,7 @@ gitmake_prepare
 
 ### Failure payloads
 
-When a GitMake MCP tool fails, read the returned `structuredContent` before falling back to shell/CLI diagnostics. v1.2.5 preserves the original GitMake machine error there, including fields such as `error.code`, `error.stage`, `error.recoverable`, `error.suggested_action`, and pipeline/security findings. Do not reduce a structured failure to a generic exit code.
+When a GitMake MCP tool fails, read the returned `structuredContent` before falling back to shell/CLI diagnostics. v1.2.5 and later preserve the original GitMake machine error there, including fields such as `error.code`, `error.stage`, `error.recoverable`, `error.suggested_action`, and pipeline/security findings. Do not reduce a structured failure to a generic exit code.
 
 ### Plan-only request
 
@@ -325,6 +325,10 @@ gitmake approve --destructive
 ```bash
 gitmake upgrade
 ```
+
+Read the result rather than assuming it succeeded. `✓ Installed <tag>` means the replacement is already on disk. `· Replacement scheduled after this process exits` means it is not yet done: report the printed verification command to the user instead of claiming the upgrade finished.
+
+An installation at v1.2.5 or earlier cannot upgrade itself on Windows — staged replacement never ran in those builds. Direct the user to run `install` from the downloaded release package once.
 
 ### Check version
 

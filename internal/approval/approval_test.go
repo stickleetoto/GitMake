@@ -2,7 +2,23 @@ package approval
 
 import "testing"
 
+// isolateApprovalStore points the approval store at a scratch directory.
+//
+// os.UserCacheDir reads a different variable on every platform, and setting
+// only XDG_CACHE_HOME isolated Linux while leaving Windows and macOS writing to
+// the developer's real store. Fixed plan ids then survived the run, so
+// `go test ./internal/approval` passed exactly once per machine and failed on
+// every later run with "approval ... was already used".
+func isolateApprovalStore(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", dir) // linux
+	t.Setenv("LocalAppData", dir)   // windows
+	t.Setenv("HOME", dir)           // darwin
+}
+
 func TestOneShotApproval(t *testing.T) {
+	isolateApprovalStore(t)
 	token, _, err := Create("gm_testapproval")
 	if err != nil {
 		t.Fatal(err)
@@ -22,6 +38,7 @@ func TestOneShotApproval(t *testing.T) {
 }
 
 func TestDestructiveApprovalRecord(t *testing.T) {
+	isolateApprovalStore(t)
 	planID := "gm_destructive_test"
 	token, _, err := Create(planID, true)
 	if err != nil {
@@ -37,7 +54,7 @@ func TestDestructiveApprovalRecord(t *testing.T) {
 }
 
 func TestTokenlessGrantBindingAndConsume(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateApprovalStore(t)
 	planID := "gm_tokenless_test"
 	binding := Binding{Fingerprint: "fp", SourceSHA256: "src", ConfigSHA256: "cfg", Repository: "owner/repo"}
 	r, err := CreateGrant(planID, binding, false)
@@ -64,7 +81,7 @@ func TestTokenlessGrantBindingAndConsume(t *testing.T) {
 }
 
 func TestCleanupKeepsFreshUnusedGrant(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateApprovalStore(t)
 	planID := "gm_cleanup_fresh"
 	binding := Binding{Fingerprint: "fp", SourceSHA256: "src", Repository: "owner/repo"}
 	if _, err := CreateGrant(planID, binding, false); err != nil {
@@ -79,7 +96,7 @@ func TestCleanupKeepsFreshUnusedGrant(t *testing.T) {
 }
 
 func TestConsumedGrantCannotBeRemintedForSamePlan(t *testing.T) {
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	isolateApprovalStore(t)
 	planID := "gm_no_replay"
 	binding := Binding{Fingerprint: "fp", SourceSHA256: "src", ConfigSHA256: "cfg", Repository: "owner/repo"}
 	if _, err := CreateGrant(planID, binding, false); err != nil {

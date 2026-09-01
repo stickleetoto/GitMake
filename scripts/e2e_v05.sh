@@ -119,6 +119,9 @@ cat > "$TMP/preview/gitmake.json" <<'JSON'
   "git": {"branch": "main"}
 }
 JSON
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+PATH="$TMP/fakebin:$PATH" require_fake_gh "$BIN"
+
 (cd "$TMP/preview" && PATH="$TMP/fakebin:$PATH" "$BIN" --dry-run --read-only --json > preview.json)
 python3 - "$TMP/preview/preview.json" <<'PY'
 import json,sys

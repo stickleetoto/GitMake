@@ -9,13 +9,25 @@ import (
 	"gitmake/internal/winreplace"
 )
 
-func StageReplacement(newExe string) error {
-	current, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("locate current executable: %w", err)
+// applyReplacement installs newExe at target.
+//
+// The normal path is a synchronous in-process rename-aside, which Windows
+// permits even when the target is the image of a running process — including
+// this one. Nothing has to be killed and the result is verifiable before the
+// command returns. The detached helper survives only as a fallback for the
+// rare case where the rename itself is refused, and it is now started in a way
+// that actually runs.
+func applyReplacement(newExe, target string) (res winreplace.Result, scheduled bool, helperLog string, err error) {
+	winreplace.SweepBackups(target)
+
+	res, replaceErr := winreplace.ReplaceExecutable(newExe, target)
+	if replaceErr == nil {
+		return res, false, "", nil
 	}
-	if _, err := winreplace.Stage(newExe, current, os.Getpid()); err != nil {
-		return fmt.Errorf("stage self-replacement: %w", err)
+
+	logPath, stageErr := winreplace.Stage(newExe, target, os.Getpid())
+	if stageErr != nil {
+		return res, false, logPath, fmt.Errorf("replace GitMake executable: %v; deferred helper also failed: %w", replaceErr, stageErr)
 	}
-	return nil
+	return res, true, logPath, nil
 }

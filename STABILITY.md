@@ -1,6 +1,6 @@
 # GitMake v1 Stability Contract
 
-GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 added MCP chat approval as an optional, backward-compatible approval transport. v1.2.0 added `gitmake_publish` as a new high-level orchestration tool without changing the frozen lower-level interfaces. v1.2.1 hardens protocol routing and approval-state validation without changing those interfaces. v1.2.2 moves self-upgrade discovery/download to anonymous public GitHub HTTPS, preserves checksum verification, and adds downgrade refusal without changing the publishing interfaces. v1.2.3 adds Windows locked-executable recovery through an exact-path, detached replacement helper without changing publishing interfaces. v1.2.4 makes that helper resilient to MCP host auto-respawn by repeating exact-path eviction before every replacement attempt, again without changing publishing interfaces. v1.2.5 hardens real-world input/error observability: stdin config now fails closed and is actually applied, security findings are aggregated, and MCP preserves existing structured CLI failures. These are bug fixes to documented behavior, not a new publishing surface.
+GitMake v1.0.0 froze the public publishing interface after the 0.x development line. v1.1.0 added MCP chat approval as an optional, backward-compatible approval transport. v1.2.0 added `gitmake_publish` as a new high-level orchestration tool without changing the frozen lower-level interfaces. v1.2.1 hardens protocol routing and approval-state validation without changing those interfaces. v1.2.2 moves self-upgrade discovery/download to anonymous public GitHub HTTPS, preserves checksum verification, and adds downgrade refusal without changing the publishing interfaces. v1.2.3 adds Windows locked-executable recovery through an exact-path, detached replacement helper without changing publishing interfaces. v1.2.4 makes that helper resilient to MCP host auto-respawn by repeating exact-path eviction before every replacement attempt, again without changing publishing interfaces. v1.2.5 hardens real-world input/error observability: stdin config now fails closed and is actually applied, security findings are aggregated, and MCP preserves existing structured CLI failures. v1.2.6 makes `gitmake upgrade` actually replace the installed executable: replacement moved from a detached helper that never ran to an in-process rename-aside that is verified before the command returns, is non-destructive, requires stopping no process, and is reported truthfully. These are bug fixes to documented behavior, not a new publishing surface.
 
 ## Stable through v1.x
 
@@ -26,6 +26,12 @@ Normal approvals expire after 10 minutes and are consumed only after a successfu
 ## Compatible evolution
 
 v1.x may add optional JSON fields, new MCP tools, new platforms, new diagnostics, or performance improvements. Existing required fields and command meanings will not be repurposed.
+
+## Self-upgrade contract
+
+`gitmake upgrade` verifies the SHA-256 of the downloaded package before anything on disk is touched, refuses to install an older published release over a newer local build, and never leaves the install path without an executable: the current one is renamed aside rather than deleted, and it is restored if the replacement cannot be completed.
+
+GitMake reports an upgrade as installed only after the replacement exists on disk. When replacement must be deferred to a helper, the helper has to prove it started, and the CLI says the replacement is scheduled rather than done. `gitmake upgrade` replaces the executable that was invoked and reports that path.
 
 ## Recovery and concurrency
 

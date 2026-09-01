@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -23,7 +24,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.5"
+const Version = "1.2.6"
 
 type Options struct {
 	Command       string
@@ -549,18 +550,53 @@ func runUpgrade(o Options) error {
 		fmt.Println("$ public GitHub Release API")
 	}
 	releases := upgrader.NewPublicReleaseClient()
-	tag, staged, err := upgrader.Upgrade(Version, releases)
+	out, err := upgrader.Upgrade(Version, releases)
 	if err != nil {
 		return err
 	}
-	if !staged {
-		fmt.Printf("✓ No upgrade needed (current %s, GitHub latest %s)\n", Version, tag)
+	if !out.Installed && !out.Scheduled {
+		fmt.Printf("✓ GitMake is up to date (current %s, GitHub latest %s)\n", Version, out.Tag)
 		return nil
 	}
-	fmt.Printf("✓ Downloaded %s\n", tag)
-	fmt.Println("✓ Upgrade staged")
-	fmt.Println("  GitMake will replace this executable after it closes.")
+
+	fmt.Printf("✓ Downloaded %s\n", out.Tag)
+	fmt.Println("✓ SHA-256 verified")
+	if out.Scheduled {
+		// Never report an install that has not actually happened yet.
+		fmt.Println("· Replacement scheduled after this process exits")
+		fmt.Printf("  %s\n", out.Target)
+		if out.HelperLog != "" {
+			fmt.Printf("  Log: %s\n", out.HelperLog)
+		}
+		fmt.Println()
+		fmt.Println("  Verify once this command has closed:")
+		fmt.Printf("  \"%s\" --version\n", out.Target)
+		return nil
+	}
+
+	fmt.Printf("✓ Installed %s\n", out.Tag)
+	fmt.Printf("  %s\n", out.Target)
+	if out.PreviousImage != "" {
+		fmt.Println("  The previous build is still running elsewhere; its file is removed on a later run.")
+	}
+	if dir := installer.InstallDir(); dir != "" {
+		installed := filepath.Join(dir, "gitmake"+exeSuffix())
+		if !samePathForDisplay(out.Target, installed) {
+			// Upgrading a copy outside the install directory is legitimate,
+			// but the user must not believe the PATH command was updated.
+			fmt.Printf("\n! This is not the installed copy at %s\n", installed)
+			fmt.Println("  Run 'gitmake install' from the upgraded executable to update the PATH command.")
+		}
+	}
+	fmt.Println("\nRun: gitmake --version")
 	return nil
+}
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
 }
 
 func runDoctor(o Options) error {

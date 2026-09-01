@@ -34,6 +34,9 @@ cat > "$TMP/stdin.json" <<'JSON'
 JSON
 
 # 1. Root --stdin is authoritative ephemeral config, not silently ignored.
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+PATH="$TMP/fakebin:$PATH" require_fake_gh "$BIN"
+
 (cd "$D" && PATH="$TMP/fakebin:$PATH" "$BIN" --stdin --dry-run --read-only --json < "$TMP/stdin.json" > "$TMP/stdin-ok.json")
 python3 - "$TMP/stdin-ok.json" <<'PY'
 import json,sys

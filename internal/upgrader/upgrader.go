@@ -21,50 +21,136 @@ type ReleaseClient interface {
 	DownloadReleaseAsset(target, tag, asset, dir string) (string, error)
 }
 
-func Upgrade(currentVersion string, releases ReleaseClient) (string, bool, error) {
+// Outcome reports exactly what an upgrade attempt did, so the CLI never has to
+// guess. Installed and Scheduled are mutually exclusive; when neither is set
+// the current build was already up to date.
+type Outcome struct {
+	// Tag is the latest published release tag.
+	Tag string
+	// Installed reports a replacement that has already completed and been
+	// verified on disk.
+	Installed bool
+	// Scheduled reports that the in-process replacement was impossible and a
+	// helper will finish it after this process exits.
+	Scheduled bool
+	// Target is the executable path that was (or will be) replaced.
+	Target string
+	// PreviousImage is set when the displaced executable is still running and
+	// therefore could not be deleted yet.
+	PreviousImage string
+	// HelperLog is the fallback helper's log path, set only when Scheduled.
+	HelperLog string
+}
+
+func Upgrade(currentVersion string, releases ReleaseClient) (Outcome, error) {
+	var out Outcome
 	tag, err := releases.LatestReleaseTag(releaseRepo)
 	if err != nil {
-		return "", false, err
+		return out, err
 	}
+	out.Tag = tag
 	latest := strings.TrimPrefix(strings.TrimSpace(tag), "v")
 	cmp, err := compareReleaseVersions(latest, currentVersion)
 	if err != nil {
-		return "", false, fmt.Errorf("compare GitMake versions: %w", err)
+		return out, fmt.Errorf("compare GitMake versions: %w", err)
 	}
 	if cmp <= 0 {
-		return tag, false, nil
+		return out, nil
 	}
-	if runtime.GOOS != "windows" || runtime.GOARCH != "amd64" {
-		return tag, false, fmt.Errorf("gitmake upgrade self-replacement is currently supported on Windows x64 only")
+
+	assetName, exeName, err := platformAsset(latest)
+	if err != nil {
+		return out, err
 	}
+	target, err := resolveTarget()
+	if err != nil {
+		return out, err
+	}
+	out.Target = target
 
 	tmp, err := os.MkdirTemp("", "gitmake-upgrade-*")
 	if err != nil {
-		return "", false, err
+		return out, err
 	}
-	// Do not remove the temp directory immediately: the Windows replacement
-	// helper needs the extracted executable after this process exits.
-	asset := fmt.Sprintf("GitMake_v%s_Windows_x64.zip", latest)
-	zipPath, err := releases.DownloadReleaseAsset(releaseRepo, tag, asset, tmp)
+	keepTmp := false
+	defer func() {
+		if !keepTmp {
+			_ = os.RemoveAll(tmp)
+		}
+	}()
+
+	zipPath, err := releases.DownloadReleaseAsset(releaseRepo, tag, assetName, tmp)
 	if err != nil {
-		return "", false, err
+		return out, err
 	}
 	checksumAsset := fmt.Sprintf("GitMake_v%s_SHA256.txt", latest)
 	checksumPath, err := releases.DownloadReleaseAsset(releaseRepo, tag, checksumAsset, tmp)
 	if err != nil {
-		return "", false, fmt.Errorf("download upgrade checksum: %w", err)
+		return out, fmt.Errorf("download upgrade checksum: %w", err)
 	}
-	if err := verifyChecksumFile(checksumPath, zipPath, asset); err != nil {
-		return "", false, fmt.Errorf("verify upgrade package: %w", err)
+	if err := verifyChecksumFile(checksumPath, zipPath, assetName); err != nil {
+		return out, fmt.Errorf("verify upgrade package: %w", err)
 	}
-	newExe, err := extractExecutable(zipPath, tmp)
+	newExe, err := extractExecutable(zipPath, tmp, exeName)
 	if err != nil {
-		return "", false, err
+		return out, err
 	}
-	if err := StageReplacement(newExe); err != nil {
-		return "", false, err
+
+	res, scheduled, helperLog, err := applyReplacement(newExe, target)
+	if err != nil {
+		return out, err
 	}
-	return tag, true, nil
+	if scheduled {
+		// The helper still needs the extracted executable after this process
+		// exits, so the temp directory has to survive.
+		keepTmp = true
+		out.Scheduled = true
+		out.HelperLog = helperLog
+		return out, nil
+	}
+	out.Installed = true
+	out.PreviousImage = res.Backup
+	return out, nil
+}
+
+// platformAsset maps the running platform to its release asset and to the
+// executable name packaged inside it.
+func platformAsset(version string) (asset, exeName string, err error) {
+	type key struct{ os, arch string }
+	names := map[key]string{
+		{"windows", "amd64"}: "Windows_x64",
+		{"linux", "amd64"}:   "Linux_x64",
+		{"linux", "arm64"}:   "Linux_arm64",
+		{"darwin", "amd64"}:  "macOS_x64",
+		{"darwin", "arm64"}:  "macOS_arm64",
+	}
+	suffix, ok := names[key{runtime.GOOS, runtime.GOARCH}]
+	if !ok {
+		return "", "", fmt.Errorf("gitmake upgrade does not publish a release build for %s/%s", runtime.GOOS, runtime.GOARCH)
+	}
+	exeName = "gitmake"
+	if runtime.GOOS == "windows" {
+		exeName = "gitmake.exe"
+	}
+	return fmt.Sprintf("GitMake_v%s_%s.zip", version, suffix), exeName, nil
+}
+
+// resolveTarget is a seam so the real-process upgrade test can install into a
+// scratch directory instead of replacing the running test binary.
+var resolveTarget = replacementTarget
+
+// replacementTarget is the executable this command will replace: the one the
+// user actually invoked. Upgrading a copy run from Downloads updates that copy
+// and leaves any installed copy alone, so the CLI reports the resolved path.
+func replacementTarget() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("locate current executable: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return filepath.Abs(exe)
 }
 
 func compareReleaseVersions(a, b string) (int, error) {
@@ -165,22 +251,22 @@ func sha256File(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func extractExecutable(zipPath, dst string) (string, error) {
+func extractExecutable(zipPath, dst, exeName string) (string, error) {
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return "", fmt.Errorf("open downloaded release asset: %w", err)
 	}
 	defer zr.Close()
 	for _, f := range zr.File {
-		if !strings.EqualFold(filepath.Base(f.Name), "gitmake.exe") || f.FileInfo().IsDir() {
+		if !strings.EqualFold(filepath.Base(f.Name), exeName) || f.FileInfo().IsDir() {
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
 			return "", err
 		}
-		out := filepath.Join(dst, "gitmake-new.exe")
-		w, err := os.Create(out)
+		out := filepath.Join(dst, "gitmake-new"+filepath.Ext(exeName))
+		w, err := os.OpenFile(out, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
 		if err != nil {
 			rc.Close()
 			return "", err
@@ -199,5 +285,5 @@ func extractExecutable(zipPath, dst string) (string, error) {
 		}
 		return out, nil
 	}
-	return "", fmt.Errorf("downloaded release asset does not contain gitmake.exe")
+	return "", fmt.Errorf("downloaded release asset does not contain %s", exeName)
 }

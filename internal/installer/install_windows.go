@@ -112,45 +112,33 @@ func copyFile(source, target string) error {
 }
 
 func replaceOrStageWindows(tmp, target string) (bool, string, error) {
-	// Fast path for a first install where no target exists.
-	if _, err := os.Stat(target); os.IsNotExist(err) {
-		if err := os.Rename(tmp, target); err == nil {
-			return false, "", nil
-		}
+	winreplace.SweepBackups(target)
+
+	// Rename-aside works even when the target is the image of a running
+	// process, so this succeeds for a first install, an update while MCP stdio
+	// servers are live, and a self-install alike. The target is never deleted
+	// before the replacement is in place, so a failure cannot leave the
+	// install directory without gitmake.exe.
+	_, replaceErr := winreplace.ReplaceExecutable(tmp, target)
+	if replaceErr == nil {
+		_ = os.Remove(tmp)
+		return false, "", nil
 	}
 
-	// Windows will not replace a running executable. Try the immediate path
-	// first; if an MCP/CLI process has the installed binary open, preserve the
-	// staged .new file and let a detached exact-path helper finish after exit.
-	removeErr := os.Remove(target)
-	if removeErr == nil || os.IsNotExist(removeErr) {
-		if err := os.Rename(tmp, target); err == nil {
-			return false, "", nil
-		}
-	}
 	// When install/setup is running from Downloads (or any executable other
-	// than the installed target), complete replacement synchronously. This
-	// gives the user a truthful success result and prevents MCP auto-respawn
-	// from winning an asynchronous race after the install command returns.
+	// than the installed target), complete replacement synchronously so the
+	// user gets a truthful success result.
 	if current, currentErr := os.Executable(); currentErr == nil && !samePath(current, target, true) {
 		logPath, syncErr := winreplace.ReplaceNow(tmp, target)
 		if syncErr == nil {
 			return false, logPath, nil
 		}
-		if removeErr != nil && !os.IsNotExist(removeErr) {
-			return false, logPath, fmt.Errorf("replace installed executable (target is locked: %v; synchronous helper failed: %w)", removeErr, syncErr)
-		}
-		return false, logPath, fmt.Errorf("replace installed executable: %w", syncErr)
+		return false, logPath, fmt.Errorf("replace installed executable (%v; synchronous helper failed: %w)", replaceErr, syncErr)
 	}
 
-	// Self-upgrade from the installed executable cannot replace its own image
-	// synchronously on Windows, so preserve the detached-after-exit path.
-	logPath, err := winreplace.Stage(tmp, target, os.Getpid())
-	if err != nil {
-		if removeErr != nil && !os.IsNotExist(removeErr) {
-			return false, "", fmt.Errorf("replace installed executable (target is locked: %v; helper failed: %w)", removeErr, err)
-		}
-		return false, "", fmt.Errorf("replace installed executable: %w", err)
+	logPath, stageErr := winreplace.Stage(tmp, target, os.Getpid())
+	if stageErr != nil {
+		return false, logPath, fmt.Errorf("replace installed executable (%v; deferred helper failed: %w)", replaceErr, stageErr)
 	}
 	return true, logPath, nil
 }

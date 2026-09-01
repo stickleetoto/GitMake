@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -80,7 +81,7 @@ func (c PublicReleaseClient) DownloadReleaseAsset(target, tag, asset, dir string
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-		return "", fmt.Errorf("download GitMake release asset: GitHub returned HTTP %d", resp.StatusCode)
+		return "", describeHTTPFailure("download GitMake release asset", resp)
 	}
 
 	path := filepath.Join(dir, filepath.Base(asset))
@@ -127,7 +128,7 @@ func (c PublicReleaseClient) fetchRelease(path string) (publicRelease, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-		return out, fmt.Errorf("check latest GitMake release: GitHub returned HTTP %d", resp.StatusCode)
+		return out, describeHTTPFailure("check latest GitMake release", resp)
 	}
 	dec := json.NewDecoder(io.LimitReader(resp.Body, 2<<20))
 	if err := dec.Decode(&out); err != nil {
@@ -147,6 +148,31 @@ func setPublicHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	req.Header.Set("User-Agent", "GitMake-Updater")
+}
+
+// describeHTTPFailure turns a GitHub status code into something a user can act
+// on. "GitHub returned HTTP 403" gives no clue that the fix is usually just
+// waiting out an anonymous rate limit.
+func describeHTTPFailure(what string, resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusForbidden, http.StatusTooManyRequests:
+		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			reset := "shortly"
+			if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
+				if secs, err := strconv.ParseInt(raw, 10, 64); err == nil {
+					reset = time.Unix(secs, 0).Local().Format("15:04:05")
+				}
+			}
+			return fmt.Errorf("%s: GitHub rate limit reached for anonymous requests; try again after %s", what, reset)
+		}
+		return fmt.Errorf("%s: GitHub refused the request (HTTP %d). A proxy or network policy may be blocking api.github.com", what, resp.StatusCode)
+	case http.StatusNotFound:
+		return fmt.Errorf("%s: no matching published release or asset was found for %s", what, releaseRepo)
+	}
+	if resp.StatusCode >= 500 {
+		return fmt.Errorf("%s: GitHub is currently unavailable (HTTP %d); try again later", what, resp.StatusCode)
+	}
+	return fmt.Errorf("%s: GitHub returned HTTP %d", what, resp.StatusCode)
 }
 
 func validateDownloadURL(raw string) error {

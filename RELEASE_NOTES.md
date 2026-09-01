@@ -1,34 +1,49 @@
-# GitMake v1.2.5 — Real-World Workflow Hardening
+# GitMake v1.2.6 — Self-Upgrade Actually Replaces the Executable
 
-GitMake v1.2.5 is a focused stability patch based on real project usage after the v1.2.4 freeze candidate. It does not change the publishing safety model or approval semantics.
+GitMake v1.2.6 fixes `gitmake upgrade` on Windows. It does not change the publishing safety model or approval semantics.
+
+## Root cause
+
+The deferred replacement helper introduced in v1.2.3 was launched with the `DETACHED_PROCESS` creation flag. `powershell.exe` is a console subsystem application: started without a console it exits immediately with status `0` **without executing the `-File` script at all**. `cmd.Start()` returned successfully, the exit code looked clean, and GitMake printed `✓ Upgrade staged` — while the helper had never run a single line.
+
+Every staged replacement from v1.2.3 through v1.2.5 was a silent no-op. The retry loops, exact-path process eviction, and respawn-race hardening added across those releases never executed once. The synchronous installer path did not set that flag, which is exactly why installing from a downloaded copy worked while self-upgrade never did.
+
+The existing tests asserted only on the *text* of the generated PowerShell script, so they could not see any of this. Every one of them passed.
 
 ## Fixed
 
-### Authoritative `--stdin` config
+### Replacement happens, in process, and is verified
 
-Root `gitmake --stdin ...` previously accepted the flag but the publish pipeline ignored the supplied JSON and continued with file/inferred config. This could make a caller believe `repo.name`, `visibility`, or `git.branch` had been applied when they had not.
+`gitmake upgrade` no longer defers replacement to a detached helper in the normal case. Windows refuses to delete or overwrite the file backing a running image, but it does permit renaming it, so GitMake renames the current executable aside, moves the verified new executable into the canonical path, and only then removes the displaced file. The outcome is confirmed on disk before the command returns.
 
-v1.2.5 strictly parses a complete config from stdin, validates it with the same schema/default rules as `gitmake.json`, uses it for the invocation, and reports `config.source: "stdin"`. Invalid or empty input fails closed. Explicit stdin config is not silently rewritten by project-memory defaults.
+No process has to be stopped for an upgrade to succeed, including the one performing it. MCP stdio servers still running the old build keep running from the renamed file until they exit, so an MCP host that auto-respawns can no longer block replacement.
 
-`gitmake plan --stdin` is rejected because an ephemeral config cannot be reproduced for later exact-plan apply. Use `gitmake config write --stdin` first when a persisted plan/apply workflow is required.
+### Replacement is never destructive
 
-### Complete security findings
+The current executable is no longer deleted before the new one is in place, and a failed attempt restores it. The previous helper ran `Remove-Item $dst` before `Move-Item`, which could leave the install directory with no `gitmake.exe` at all.
 
-The scanner previously stopped after the first matching secret kind inside each file, and Slack tokens were not part of the high-confidence rules. It now aggregates every supported kind per file and across files, with deterministic path/kind ordering, and includes a Slack token rule. The block still occurs before mutation.
+### Non-ASCII install paths
 
-### MCP error transparency
+Generated PowerShell helper scripts are now written with a UTF-8 BOM. Windows PowerShell 5.1 decodes a BOM-less `-File` script using the system ANSI code page, so on a Korean (or any non-Latin) Windows install the embedded paths were corrupted before the script ran and the helper failed with `Illegal characters in path`.
 
-CLI failures already carried structured machine errors, but the MCP adapter discarded that payload and returned only a generic exit-code message. MCP error results now preserve the original GitMake machine result in `structuredContent` and text content, including error code, stage, recovery guidance, and security findings.
+### Truthful reporting
 
-### CLI guidance
+GitMake prints `✓ Installed <tag>` only for a replacement that has actually completed. When a deferred helper is genuinely required it prints `· Replacement scheduled after this process exits` with the log path and a verification command, and the helper must prove it started before that is reported at all.
 
-`gitmake preview` is not a real subcommand in the flag-oriented CLI. v1.2.5 detects that common mistake and points users to `gitmake --dry-run --read-only` rather than trying to open a path named `preview`.
+`gitmake upgrade` replaces the executable that was invoked and now names it. When that is not the installed copy on PATH, the output says so instead of letting the user assume the PATH command was updated.
+
+### Other updater fixes
+
+- The download directory is removed once replacement completes, instead of leaking roughly 10 MB per attempt into `%TEMP%` permanently.
+- `gitmake upgrade` works on Linux and macOS. The updater previously refused to run anywhere but Windows x64 despite those release builds being published.
+- GitHub failures distinguish anonymous rate limiting, proxy blocking, missing releases, and outages instead of surfacing a bare `GitHub returned HTTP 403`.
+- Brief sharing violations from antivirus or the search indexer are absorbed by a short bounded rename retry.
 
 ## Verification
 
+- `go build ./...`
 - `go test ./...`
 - `go vet ./...`
-- `go test -race ./...`
 - v1.0 guided/tokenless stability E2E
 - v1.1 chat approval E2E
 - v1.2 one-shot publish E2E
@@ -36,6 +51,19 @@ CLI failures already carried structured machine errors, but the MCP adapter disc
 - v1.2.3 locked executable recovery E2E
 - v1.2.4 respawn-safe replacement E2E
 - v1.2.5 real-world workflow E2E
+- v1.2.6 updater lifecycle E2E
 - GitMake source-tree self secret scan
 
+New process-level coverage replaces the string-only helper assertions: the staged helper is launched for real and must produce observable evidence that it ran, and a live executable is replaced while a process is still running it. The regression guard was confirmed to fail against the `DETACHED_PROCESS` flag that caused this bug.
+
 No repository was published during these local regression checks.
+
+## Upgrading from v1.2.5 or earlier
+
+Because self-upgrade never worked on Windows, an installation at v1.2.5 or earlier cannot upgrade itself to v1.2.6. Install once from the release package:
+
+```powershell
+.\gitmake.exe install
+```
+
+`gitmake upgrade` works normally from v1.2.6 onward.

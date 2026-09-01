@@ -37,6 +37,9 @@ with zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED) as z:
     z.writestr('README.md','# Demo\n')
     z.writestr('src/main.py','print("hi")\n')
 PY
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+PATH="$TMP/fakebin:$PATH" require_fake_gh "$BIN"
+
 (cd "$D" && PATH="$TMP/fakebin:$PATH" "$BIN" --dry-run --read-only --json > out.json)
 test ! -e "$D/gitmake.json"
 python3 - "$D/out.json" <<'PY'

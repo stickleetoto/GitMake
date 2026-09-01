@@ -203,6 +203,8 @@ exit 2
 GH
 chmod +x "$TMP/fakebin/gh"
 export PATH="$TMP/fakebin:$PATH"
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+require_fake_gh "$BIN"
 export FAKE_GH_ROOT="$TMP/remotes"
 export XDG_CACHE_HOME="$TMP/cache"
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig"

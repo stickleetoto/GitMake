@@ -50,6 +50,8 @@ exit 2
 GH
 chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH" FAKE_GH_ROOT="$TMP/remotes" GIT_CONFIG_GLOBAL="$TMP/gitconfig"
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+require_fake_gh "$BIN"
 git config --global user.name "GitMake Test"
 git config --global user.email "gitmake@test.invalid"
 makezip(){ python - "$@" <<'PY'

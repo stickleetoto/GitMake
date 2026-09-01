@@ -116,6 +116,8 @@ exit 2
 GH
 chmod +x "$TMP/bin/gh"
 export PATH="$TMP/bin:$PATH"
+source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+require_fake_gh "$BIN"
 export FAKE_GH_ROOT="$TMP/remotes"
 export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 git config --global user.name "GitMake E2E"
