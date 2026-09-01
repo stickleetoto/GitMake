@@ -54,6 +54,7 @@ var contentRules = []struct {
 	{"github_token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{20,}\b`)},
 	{"github_fine_grained_token", regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`)},
 	{"aws_access_key", regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)},
+	{"slack_token", regexp.MustCompile(`\bxox(?:b|p|a|r|s)-[A-Za-z0-9-]{10,}\b`)},
 }
 
 func Scan(root string, o Options) (Report, error) {
@@ -121,12 +122,16 @@ func Scan(root string, o Options) (Report, error) {
 			if rule.re.Match(data) {
 				report.Findings = append(report.Findings, Finding{Path: rel, Kind: rule.kind, Detail: "high-confidence secret pattern detected"})
 				report.Blocking = true
-				break
 			}
 		}
 		return nil
 	})
-	sort.Slice(report.Findings, func(i, j int) bool { return report.Findings[i].Path < report.Findings[j].Path })
+	sort.Slice(report.Findings, func(i, j int) bool {
+		if report.Findings[i].Path == report.Findings[j].Path {
+			return report.Findings[i].Kind < report.Findings[j].Kind
+		}
+		return report.Findings[i].Path < report.Findings[j].Path
+	})
 	sort.Slice(report.LargeFiles, func(i, j int) bool { return report.LargeFiles[i].Path < report.LargeFiles[j].Path })
 	return report, err
 }

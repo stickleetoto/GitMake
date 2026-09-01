@@ -1,4 +1,4 @@
-# GitMake v1.2.4
+# GitMake v1.2.5
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -18,7 +18,7 @@ optional Release + assets
 
 v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow. In elicitation-capable MCP clients, the new `gitmake_publish` tool performs prepare → reviewed plan → human approval → exact-plan revalidation → apply → final result as one interactive MCP operation. Agents no longer need to stop the chat between `gitmake_prepare` and `gitmake_apply`. Existing `gitmake_prepare`, `gitmake_apply`, terminal `gitmake approve`, schemas, safety gates, and approval semantics remain backward compatible.
 
-v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardened self-upgrade by using public GitHub Releases over anonymous HTTPS, preserving SHA-256 verification, and refusing accidental downgrades. v1.2.3 introduced Windows locked-executable recovery. v1.2.4 closes a respawn race in that helper: MCP hosts that automatically restart the installed GitMake can no longer relock the target between replacement retries, because exact-path eviction now runs before every move attempt and waits briefly for process exit. Manual install/setup launched from a different executable (for example a downloaded release) now completes that locked-target replacement synchronously instead of returning while an old installed binary is still active.
+v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardened self-upgrade by using public GitHub Releases over anonymous HTTPS, preserving SHA-256 verification, and refusing accidental downgrades. v1.2.3 introduced Windows locked-executable recovery. v1.2.4 closed the MCP auto-respawn race during Windows replacement. v1.2.5 is a real-world workflow hardening patch: root `--stdin` configuration is now authoritative and fail-closed, security scan output aggregates every supported finding, MCP tool failures preserve the structured CLI error payload, and `gitmake preview` now returns actionable guidance instead of being mistaken for a source path.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -66,7 +66,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.4
+GitMake 1.2.5
 
 testuser/GambleLM
 Update · public
@@ -111,6 +111,17 @@ https://github.com/testuser/GambleLM
 ```
 
 When GitMake blocks, it now follows the error with a `Recommended` section. Examples include choosing an explicit source for `SOURCE_AMBIGUOUS`, running `gh auth login` for missing GitHub auth, excluding files that should never be published after `SECRET_DETECTED`, and rebuilding a fresh plan after stale input/remote state. Safety-critical identity mismatches are never auto-fixed.
+
+### Ephemeral config from stdin
+
+For automation that needs a one-run config without writing `gitmake.json`, `--stdin` now accepts a **complete GitMake config** for publish/preview:
+
+```bash
+printf '%s' '{"repo":{"name":"demo","visibility":"public"},"source":{"folder":"."},"git":{"branch":"develop"}}' \
+  | gitmake --stdin --dry-run --read-only --json
+```
+
+The stdin config is authoritative for that invocation, is reported as `config.source: "stdin"`, and is never silently replaced by inferred defaults. Invalid/empty/trailing/unknown-field JSON fails closed. `gitmake plan --stdin` is intentionally rejected because an ephemeral config cannot be revalidated later during `apply`; persist it first with `gitmake config write --stdin` if you need the plan/apply workflow.
 
 ### Zero-config by default
 

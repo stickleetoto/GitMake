@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -62,5 +63,31 @@ func TestParseFlagsAfterPositional(t *testing.T) {
 	}
 	if o.SourceArg != "Project.zip" || !o.DryRun || !o.ReadOnly || !o.JSON {
 		t.Fatalf("unexpected publish parse: %#v", o)
+	}
+}
+
+func TestPublishStdinFlagIsNotSilentlyIgnored(t *testing.T) {
+	o, err := parseArgs([]string{"--stdin", "--dry-run", "--read-only", "--json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Command != "publish" || !o.Stdin || !o.DryRun || !o.ReadOnly || !o.JSON {
+		t.Fatalf("unexpected stdin publish parse: %#v", o)
+	}
+	if _, err := parseArgs([]string{"doctor", "--stdin"}); err == nil {
+		t.Fatal("--stdin on unrelated commands must be rejected instead of ignored")
+	}
+	if _, err := parseArgs([]string{"plan", "--stdin"}); err == nil {
+		t.Fatal("plan --stdin must be rejected because ephemeral config cannot be revalidated")
+	}
+}
+
+func TestPreviewPseudoSubcommandGetsGuidance(t *testing.T) {
+	_, err := parseArgs([]string{"preview"})
+	if err == nil {
+		t.Fatal("expected guidance for gitmake preview")
+	}
+	if got := err.Error(); !strings.Contains(got, "--dry-run --read-only") {
+		t.Fatalf("unexpected guidance: %s", got)
 	}
 }

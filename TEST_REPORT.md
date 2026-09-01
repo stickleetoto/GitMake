@@ -1,29 +1,29 @@
-# GitMake v1.2.4 Test Report
+# GitMake v1.2.5 Test Report
 
-**PASS** for the Respawn-Safe Replacement patch.
-
-## Core regression
+## Core verification
 
 - `go test ./...` — PASS
 - `go vet ./...` — PASS
 - `go test -race ./...` — PASS
+- repository source-tree secret self-scan — PASS
 
-## Publishing / MCP regression
+## Compatibility / E2E
 
-- v1.0 guided/stability E2E — PASS
+- v1.0 guided/tokenless stability E2E — PASS
 - v1.1 chat approval E2E — PASS
 - v1.2 one-shot publish E2E — PASS
-- v1.2.1 protocol routing E2E — PASS
-- v1.2.3 locked-executable recovery E2E — PASS
-- v1.2.4 respawn-safe replacement E2E — PASS
+- v1.2.1 modern/legacy protocol routing E2E — PASS
+- v1.2.3 locked executable recovery E2E — PASS
+- v1.2.4 respawn-safe Windows replacement E2E — PASS
+- v1.2.5 real-world workflow E2E — PASS
 
-## v1.2.4 replacement coverage
+## v1.2.5 regression coverage
 
-- exact-target process eviction occurs inside the replacement retry loop;
-- process termination is still scoped to exact executable-path equality;
-- `Wait-Process` synchronization runs before replacement to allow handle release;
-- downloaded/manual install uses the synchronous replacement path while installed-copy self-upgrade retains detached replacement;
-- broad image-name termination (`taskkill /IM gitmake.exe`) remains explicitly absent;
-- installer, upgrader, and replacement-helper Windows amd64 test binaries cross-compile successfully.
+1. Root `--stdin` config overrides inference for repo name, visibility, branch, and source without writing `gitmake.json`.
+2. Invalid stdin JSON exits non-zero with `CONFIG_INVALID`; no fallback to inferred config occurs.
+3. `--stdin` on unrelated commands is rejected; `plan --stdin` is rejected with persistence guidance.
+4. Multiple secret kinds in one file and across files are all surfaced; Slack high-confidence tokens are detected.
+5. MCP tool failure preserves the CLI machine result, including `SECRET_DETECTED` / `CONFIG_INVALID`, stage, recoverability, suggested action, and pipeline details.
+6. `gitmake preview` emits usage guidance instead of a source-path filesystem error.
 
-A live Windows lock/respawn execution test cannot run in the Linux packaging environment; the target-machine smoke test remains the final platform check.
+No publish/apply mutation was required for the v1.2.5 regression suite.

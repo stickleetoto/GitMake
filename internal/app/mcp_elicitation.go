@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -651,9 +652,17 @@ func (s *mcpServer) toolSuccessResponse(base mcpResponse, result any, modern boo
 }
 
 func (s *mcpServer) toolErrorResponse(base mcpResponse, err error, modern bool) mcpResponse {
+	contentValue := any(map[string]any{"ok": false, "error": err.Error()})
+	var commandErr *gitMakeCommandError
+	if errors.As(err, &commandErr) && commandErr.Payload != nil {
+		contentValue = commandErr.Payload
+	}
 	payload := map[string]any{
-		"content": []map[string]any{{"type": "text", "text": mustJSONString(map[string]any{"ok": false, "error": err.Error()})}},
+		"content": []map[string]any{{"type": "text", "text": mustJSONString(contentValue)}},
 		"isError": true,
+	}
+	if commandErr != nil && commandErr.Payload != nil {
+		payload["structuredContent"] = commandErr.Payload
 	}
 	if modern {
 		payload["resultType"] = "complete"

@@ -79,3 +79,39 @@ func TestRepositorySourceTreeDoesNotSelfTriggerSecretScan(t *testing.T) {
 		t.Fatalf("GitMake source tree must pass its own secret scan before self-publish: %#v", r.Findings)
 	}
 }
+
+func TestSecretScanReportsAllKindsAcrossAndWithinFiles(t *testing.T) {
+	root := t.TempDir()
+	aws := "AKIA" + "ABCDEFGHIJKLMNOP"
+	slack := "xox" + "b-1234567890-abcdefghijklmnopqrstuv"
+	github := "gh" + "p_abcdefghijklmnopqrstuvwxyz012345"
+	if err := os.WriteFile(filepath.Join(root, "leak_one.txt"), []byte(aws+"\n"+github+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "leak_two.txt"), []byte(slack+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := Scan(root, Options{SecretScan: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.Blocking || r.ScannedFiles != 2 {
+		t.Fatalf("unexpected scan summary: %#v", r)
+	}
+	got := map[string]bool{}
+	for _, f := range r.Findings {
+		got[f.Path+":"+f.Kind] = true
+	}
+	for _, want := range []string{
+		"leak_one.txt:aws_access_key",
+		"leak_one.txt:github_token",
+		"leak_two.txt:slack_token",
+	} {
+		if !got[want] {
+			t.Fatalf("missing finding %s; got %#v", want, r.Findings)
+		}
+	}
+	if len(r.Findings) != 3 {
+		t.Fatalf("expected exactly three distinct secret kinds, got %#v", r.Findings)
+	}
+}

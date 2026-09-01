@@ -40,6 +40,15 @@ type mcpError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+type gitMakeCommandError struct {
+	ExitCode int
+	Payload  any
+}
+
+func (e *gitMakeCommandError) Error() string {
+	return fmt.Sprintf("GitMake command failed with exit code %d", e.ExitCode)
+}
+
 type mcpTool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
@@ -644,7 +653,7 @@ func invokeGitMakeJSON(projectDir string, stdin []byte, args ...string) (any, er
 		decoded = map[string]any{"schema": "gitmake.mcp-cli/v1", "ok": code == 0, "exit_code": code}
 	}
 	if code != 0 {
-		return decoded, fmt.Errorf("GitMake command failed with exit code %d", code)
+		return decoded, &gitMakeCommandError{ExitCode: code, Payload: decoded}
 	}
 	return decoded, nil
 }

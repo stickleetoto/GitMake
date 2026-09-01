@@ -23,7 +23,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.4"
+const Version = "1.2.5"
 
 type Options struct {
 	Command       string
@@ -238,7 +238,13 @@ func parseArgs(args []string) (Options, error) {
 			return Options{}, fmt.Errorf("expected at most one source path, got: %s", strings.Join(rest, " "))
 		}
 		if len(rest) == 1 {
+			if o.Command == "publish" && strings.EqualFold(rest[0], "preview") {
+				return Options{}, errors.New("`gitmake preview` is not a subcommand; use `gitmake --dry-run --read-only` (add --json for machine output). If `preview` is really a source path, pass it explicitly as `.\\preview` or an absolute path")
+			}
 			o.SourceArg = rest[0]
+		}
+		if o.Command == "plan" && o.Stdin {
+			return Options{}, errors.New("`gitmake plan --stdin` is not supported because an ephemeral config cannot be revalidated later; use `gitmake config write --stdin` first, or use `gitmake --stdin --dry-run --read-only` for an ephemeral preview")
 		}
 	case "apply":
 		if len(rest) != 1 {
@@ -269,6 +275,12 @@ func parseArgs(args []string) (Options, error) {
 	case "doctor", "install", "upgrade", "help", "discover", "inspect", "history", "mcp", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
+		}
+	}
+	if o.Stdin {
+		stdinAllowed := o.Command == "publish" || (o.Command == "config" && (o.ConfigAction == "write" || o.ConfigAction == "patch"))
+		if !stdinAllowed {
+			return Options{}, fmt.Errorf("--stdin is not valid with `gitmake %s`; it is accepted for ephemeral publish/preview config and `gitmake config write|patch`", o.Command)
 		}
 	}
 	return o, nil
@@ -777,7 +789,24 @@ func runPublish(o Options) error {
 		return fmt.Errorf("check config: %w", statErr)
 	}
 
-	if configExists {
+	if o.Stdin {
+		incoming, readErr := readLimitedStdin()
+		if readErr != nil {
+			return readErr
+		}
+		cfg, err = config.ParseBytes(incoming)
+		if err != nil {
+			return err
+		}
+		configSource = "stdin"
+		source = explicit
+		if source.Path == "" {
+			source, err = configuredSource(configPath, &cfg, true)
+			if err != nil {
+				return err
+			}
+		}
+	} else if configExists {
 		cfg, err = config.Load(configPath)
 		if err != nil {
 			return err
@@ -832,7 +861,10 @@ func runPublish(o Options) error {
 		return fmt.Errorf("resolve source path: %w", err)
 	}
 	memoryUsed := false
-	if !configPersisted {
+	// Explicit stdin configuration is authoritative. Project memory may still
+	// block an unsafe retarget below, but it must never silently rewrite the
+	// caller's repo/branch/visibility choices.
+	if !configPersisted && configSource != "stdin" {
 		memoryUsed, err = applyFolderProjectMemory(source, &cfg)
 		if err != nil {
 			return err
@@ -851,6 +883,12 @@ func runPublish(o Options) error {
 		if err != nil {
 			return fmt.Errorf("hash config: %w", err)
 		}
+	} else if configSource == "stdin" {
+		normalized, normErr := config.MarshalNormalized(cfg)
+		if normErr != nil {
+			return normErr
+		}
+		configSHA = sha256Bytes(normalized)
 	}
 	if o.State != nil {
 		o.State.SourceMode = source.Mode
@@ -941,7 +979,9 @@ func runPublish(o Options) error {
 	if source.Repaired {
 		fmt.Printf("✓ Source selected       %s\n", sourceDisplay(source))
 	}
-	if configSource == "inferred" {
+	if configSource == "stdin" {
+		fmt.Printf("✓ Config               stdin · validated ephemeral config\n")
+	} else if configSource == "inferred" {
 		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
 	} else if configSource == "project_memory" {
 		fmt.Printf("✓ Project memory        %s\n", target)

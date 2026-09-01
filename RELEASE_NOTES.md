@@ -1,29 +1,41 @@
-# GitMake v1.2.4 — Respawn-Safe Replacement
+# GitMake v1.2.5 — Real-World Workflow Hardening
 
-GitMake v1.2.4 hardens the Windows locked-executable recovery introduced in v1.2.3.
+GitMake v1.2.5 is a focused stability patch based on real project usage after the v1.2.4 freeze candidate. It does not change the publishing safety model or approval semantics.
 
 ## Fixed
 
-v1.2.3 could stage `gitmake.exe.new` successfully but still leave the installed executable on the old version when an MCP host automatically restarted its stdio GitMake process. The replacement helper stopped matching processes only once. A host that respawned GitMake during the retry window could immediately lock the same installed `gitmake.exe` again.
+### Authoritative `--stdin` config
 
-v1.2.4 moves exact-path process eviction inside the replacement retry loop. Before every remove/move attempt, the helper:
+Root `gitmake --stdin ...` previously accepted the flag but the publish pipeline ignored the supplied JSON and continued with file/inferred config. This could make a caller believe `repo.name`, `visibility`, or `git.branch` had been applied when they had not.
 
-1. enumerates running `gitmake` processes;
-2. selects only processes whose executable path exactly matches the installed target;
-3. force-stops those exact-target processes;
-4. briefly waits for process termination so Windows can release image/file handles;
-5. immediately retries the staged executable move.
+v1.2.5 strictly parses a complete config from stdin, validates it with the same schema/default rules as `gitmake.json`, uses it for the invocation, and reports `config.source: "stdin"`. Invalid or empty input fails closed. Explicit stdin config is not silently rewritten by project-memory defaults.
 
-This sequence repeats for the recovery window, so MCP auto-respawn no longer defeats later retries.
+`gitmake plan --stdin` is rejected because an ephemeral config cannot be reproduced for later exact-plan apply. Use `gitmake config write --stdin` first when a persisted plan/apply workflow is required.
 
-## Synchronous manual install
+### Complete security findings
 
-When `gitmake install` or `GitMake-Setup.exe` is running from a downloaded release rather than from the installed target itself, v1.2.4 performs the exact-path lock cleanup and replacement synchronously. The install command no longer returns a staged-success message while the installed binary can still be the old version. Detached replacement remains only for true self-upgrade cases where the currently running process is the installed executable that must replace itself after exit.
+The scanner previously stopped after the first matching secret kind inside each file, and Slack tokens were not part of the high-confidence rules. It now aggregates every supported kind per file and across files, with deterministic path/kind ordering, and includes a Slack token rule. The block still occurs before mutation.
 
-## Safety boundary
+### MCP error transparency
 
-The helper still never uses broad image-name termination. A GitMake copy running from Downloads or another project directory is left untouched. Only the normalized installed target path is eligible for termination.
+CLI failures already carried structured machine errors, but the MCP adapter discarded that payload and returned only a generic exit-code message. MCP error results now preserve the original GitMake machine result in `structuredContent` and text content, including error code, stage, recovery guidance, and security findings.
 
-## Compatibility
+### CLI guidance
 
-No GitMake publishing interface, config schema, plan format, approval protocol, or MCP tool contract changes in v1.2.4.
+`gitmake preview` is not a real subcommand in the flag-oriented CLI. v1.2.5 detects that common mistake and points users to `gitmake --dry-run --read-only` rather than trying to open a path named `preview`.
+
+## Verification
+
+- `go test ./...`
+- `go vet ./...`
+- `go test -race ./...`
+- v1.0 guided/tokenless stability E2E
+- v1.1 chat approval E2E
+- v1.2 one-shot publish E2E
+- v1.2.1 protocol routing E2E
+- v1.2.3 locked executable recovery E2E
+- v1.2.4 respawn-safe replacement E2E
+- v1.2.5 real-world workflow E2E
+- GitMake source-tree self secret scan
+
+No repository was published during these local regression checks.

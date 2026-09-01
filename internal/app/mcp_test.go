@@ -360,3 +360,35 @@ func TestMCPServerDiscoverAdvertisesModernProtocol(t *testing.T) {
 		t.Fatalf("modern discovery response incomplete: %s", b)
 	}
 }
+
+func TestMCPPreservesStructuredCLIErrorPayload(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "gitmake.json"), []byte(`{"repo":{"name":"demo","unknown":1},"source":{"folder":"."}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := &mcpServer{}
+	params, _ := json.Marshal(map[string]any{
+		"name":      "gitmake_config_validate",
+		"arguments": map[string]any{"project_dir": dir},
+	})
+	resp, ok := s.handle(mcpRequest{JSONRPC: "2.0", ID: float64(1), Method: "tools/call", Params: params})
+	if !ok || resp.Error != nil {
+		t.Fatalf("unexpected protocol error: %#v", resp)
+	}
+	result, ok := resp.Result.(map[string]any)
+	if !ok || result["isError"] != true {
+		t.Fatalf("expected MCP tool error result, got %#v", resp.Result)
+	}
+	structured, ok := result["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatalf("structured CLI failure payload missing: %#v", result)
+	}
+	errObj, ok := structured["error"].(map[string]any)
+	if !ok || errObj["code"] != "CONFIG_INVALID" {
+		t.Fatalf("expected CONFIG_INVALID structured payload, got %#v", structured)
+	}
+	b, _ := json.Marshal(result["content"])
+	if !bytes.Contains(b, []byte("CONFIG_INVALID")) || !bytes.Contains(b, []byte("unknown")) {
+		t.Fatalf("text content should preserve actionable CLI error too: %s", b)
+	}
+}

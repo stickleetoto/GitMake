@@ -1,3 +1,14 @@
+## v1.2.5 — Real-World Workflow Hardening
+
+- Fixed root `--stdin` publish/preview configuration being parsed as a flag but silently ignored. A complete stdin config is now strictly parsed, validated, applied for the current invocation, and reported as `config.source: "stdin"`.
+- Malformed, empty, trailing, and unknown-field stdin JSON now fails closed with a structured config error instead of falling back to inferred defaults.
+- Explicit stdin config no longer gets silently rewritten by folder project memory. Existing project identity can still block unsafe retargeting.
+- `gitmake plan --stdin` is explicitly rejected because ephemeral config cannot be revalidated during later apply; use `config write --stdin` first or an ephemeral dry-run preview.
+- Security scanning now reports every supported secret kind found in a file rather than stopping after the first kind, and adds high-confidence Slack token detection.
+- MCP tool failures now preserve the complete CLI machine payload (`code`, `message`, `stage`, `recoverable`, `suggested_action`, pipeline/security details) in both text and `structuredContent` instead of collapsing to `exit code 1`.
+- `gitmake preview` now produces an actionable usage error pointing to `--dry-run --read-only` instead of being treated as a source path.
+- Added `e2e_v125.sh` covering stdin authority/fail-closed behavior, multi-finding security scan output, MCP structured errors, and preview guidance.
+
 ## v1.2.4 — Respawn-Safe Replacement
 
 - Fixed a Windows replacement race where an MCP host could automatically respawn the installed GitMake after the helper stopped it, relocking `gitmake.exe` before the next retry.

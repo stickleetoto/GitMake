@@ -93,6 +93,10 @@ gitmake_prepare
 → gitmake_apply(plan_id)
 ```
 
+### Failure payloads
+
+When a GitMake MCP tool fails, read the returned `structuredContent` before falling back to shell/CLI diagnostics. v1.2.5 preserves the original GitMake machine error there, including fields such as `error.code`, `error.stage`, `error.recoverable`, `error.suggested_action`, and pipeline/security findings. Do not reduce a structured failure to a generic exit code.
+
 ### Plan-only request
 
 When the user explicitly says “prepare only”, “show me the plan”, or “do not publish yet”, call:
@@ -169,6 +173,8 @@ Never assume an outer bundle ZIP itself is the source project if GitMake reports
 A `gitmake.json` file is **not required** for normal use.
 
 GitMake can infer a safe configuration in memory.
+
+For shell automation that intentionally supplies a one-run complete config, `gitmake --stdin` is an ephemeral publish/preview config path. Treat malformed stdin as a hard failure; GitMake must not fall back to inference. For reviewed plan/apply workflows, persist with `gitmake config write --stdin` first.
 
 Do not create or edit `gitmake.json` with generic filesystem Write/Edit tools unless the user explicitly wants a persistent config and GitMake does not provide a config-writing tool.
 
