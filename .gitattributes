@@ -1,0 +1,13 @@
+# Without this the repository had no line-ending policy, so a Windows checkout
+# converted every file to CRLF and `gofmt -l` then flagged the entire tree.
+# Normalize to LF in the repository and on checkout; only the Windows script
+# formats keep CRLF, because cmd.exe and PowerShell want it.
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+*.go  text eol=lf
+
+*.exe binary
+*.zip binary

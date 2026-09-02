@@ -1,0 +1,238 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Unit tests on every platform GitMake ships a binary for. Windows is a
+  # first-class target here, not an afterthought: the v1.2.3-v1.2.5 self-upgrade
+  # defect was Windows-only and shipped three times because nothing but one
+  # developer machine ever exercised it.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod pins the minimum language version, not a toolchain; that
+          # version's macOS linker omits LC_UUID and dyld then refuses the
+          # binary. GitMake has no dependencies, so there is no cache key.
+          go-version: stable
+          cache: false
+
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted="$(gofmt -l ./cmd ./internal)"
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go build
+        run: go build ./...
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      # The suite used to pass exactly once per machine: the approval tests
+      # wrote consumed-grant markers into the real user cache under fixed plan
+      # ids, and only Linux honoured the XDG_CACHE_HOME override they set. A
+      # second run is the cheapest guard against that class of hidden state.
+      - name: go test (repeatable)
+        run: go test -count=1 ./...
+
+  # The race detector needs cgo. Linux and macOS runners ship a C compiler;
+  # Windows runners do not reliably, so it is not part of the Windows matrix.
+  race:
+    name: race (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod pins the minimum language version, not a toolchain; that
+          # version's macOS linker omits LC_UUID and dyld then refuses the
+          # binary. GitMake has no dependencies, so there is no cache key.
+          go-version: stable
+          cache: false
+      - name: go test -race
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race -count=1 ./...
+
+  # The full E2E suite. Most of these stub the GitHub CLI with a shell script
+  # and several drive interactive prompts through a pty, so Linux is the only
+  # platform where all of them can run today.
+  e2e-linux:
+    name: e2e (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod pins the minimum language version, not a toolchain; that
+          # version's macOS linker omits LC_UUID and dyld then refuses the
+          # binary. GitMake has no dependencies, so there is no cache key.
+          go-version: stable
+          cache: false
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "GitMake CI"
+          git config --global user.email "ci@example.test"
+
+      - name: Run E2E suites
+        run: |
+          set -euo pipefail
+          # These four assert behaviour v1.0 deliberately removed: the
+          # token-based approval flow that printed a gma_... token, and
+          # publishing without interactive confirmation. They have failed since
+          # v1.0 and cannot be "fixed" -- they must be ported to the current
+          # approval model or retired. Quarantined so the rest of the suite
+          # stays a meaningful gate rather than permanently red.
+          quarantined="scripts/e2e_v03.sh scripts/e2e_v07.sh scripts/e2e_v072.sh scripts/e2e_v073.sh"
+
+          failed=()
+          for script in scripts/e2e*.sh; do
+            case " $quarantined " in *" $script "*) continue ;; esac
+            echo "::group::$script"
+            if bash "$script"; then
+              echo "PASS $script"
+            else
+              code=$?
+              echo "FAIL $script (exit $code)"
+              failed+=("$script")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failing suites: ${failed[*]}"
+            exit 1
+          fi
+
+      - name: Quarantined pre-v1.0 suites (reported, not blocking)
+        continue-on-error: true
+        run: |
+          for script in scripts/e2e_v03.sh scripts/e2e_v07.sh scripts/e2e_v072.sh scripts/e2e_v073.sh; do
+            echo "::group::$script"
+            bash "$script" && echo "PASS $script" || echo "STILL FAILING $script"
+            echo "::endgroup::"
+          done
+
+  # Suites that run on Windows today. The rest drive interactive confirmation
+  # through a pty, which has no Windows equivalent here; that gap is tracked
+  # separately rather than hidden. Windows coverage is not optional for this
+  # project: the v1.2.3-v1.2.5 self-upgrade defect was Windows-only.
+  e2e-windows:
+    name: e2e (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod pins the minimum language version, not a toolchain; that
+          # version's macOS linker omits LC_UUID and dyld then refuses the
+          # binary. GitMake has no dependencies, so there is no cache key.
+          go-version: stable
+          cache: false
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "GitMake CI"
+          git config --global user.email "ci@example.test"
+
+      - name: Run Windows-capable E2E suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          suites=(
+            scripts/e2e_v05.sh
+            scripts/e2e_v051.sh
+            scripts/e2e_v052.sh
+            scripts/e2e_v121.sh
+            scripts/e2e_v123.sh
+            scripts/e2e_v124.sh
+            scripts/e2e_v126.sh
+          )
+          failed=()
+          for script in "${suites[@]}"; do
+            echo "::group::$script"
+            if bash "$script"; then
+              echo "PASS $script"
+            else
+              echo "FAIL $script"
+              failed+=("$script")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "Failing suites: ${failed[*]}"
+            exit 1
+          fi
+
+  # Builds the real release artifacts on every change and then proves the
+  # published source ZIP is self-sufficient. v1.2.5 shipped a source package
+  # that carried a stray empty file, and its checksum manifest was written with
+  # CRLF endings that `sha256sum -c` refuses to read. Both are caught here.
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          # go.mod pins the minimum language version, not a toolchain; that
+          # version's macOS linker omits LC_UUID and dyld then refuses the
+          # binary. GitMake has no dependencies, so there is no cache key.
+          go-version: stable
+          cache: false
+
+      - name: Build all release artifacts
+        run: python3 scripts/package.py --out dist/release
+
+      - name: Verify the checksum manifest
+        working-directory: dist/release
+        run: sha256sum -c GitMake_v*_SHA256.txt
+
+      - name: Rebuild and test from the published source ZIP
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          unzip -q dist/release/GitMake_v*_Source.zip -d "$work"
+          cd "$work"/gitmake-v*
+          go build ./...
+          go vet ./...
+          go test -count=1 ./...
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gitmake-release
+          path: dist/release
+          if-no-files-found: error
+          retention-days: 14

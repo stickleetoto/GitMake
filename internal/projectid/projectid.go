@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gitmake/internal/gmerr"
 )
 
 const RelativePath = ".gitmake/project.json"
@@ -62,7 +64,7 @@ func Validate(root, repository string) (Record, bool, error) {
 		return r, exists, err
 	}
 	if !strings.EqualFold(strings.TrimSpace(r.Repository), strings.TrimSpace(repository)) {
-		return r, true, fmt.Errorf("project identity mismatch: repository is bound to %s, but this operation targets %s", r.Repository, repository)
+		return r, true, gmerr.New(gmerr.ProjectIdentityMismatch, "project identity mismatch: repository is bound to %s, but this operation targets %s", r.Repository, repository)
 	}
 	return r, true, nil
 }

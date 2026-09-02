@@ -10,6 +10,7 @@ import (
 	"gitmake/internal/config"
 	"gitmake/internal/discovery"
 	"gitmake/internal/foldersource"
+	"gitmake/internal/gmerr"
 )
 
 type sourceCandidate struct {
@@ -136,7 +137,7 @@ func inferSource(cwd string) (sourceSelection, error) {
 	if fd.IsProject {
 		return sourceSelection{Mode: "folder", Path: cwd, Folder: &fd, Discovery: &dr}, nil
 	}
-	return sourceSelection{Discovery: &dr, Folder: &fd}, fmt.Errorf("no project source found; run GitMake inside a project folder or provide a .zip file")
+	return sourceSelection{Discovery: &dr, Folder: &fd}, gmerr.New(gmerr.SourceNotFound, "no project source found; run GitMake inside a project folder or provide a .zip file")
 }
 
 func hashSelectedSource(sel sourceSelection) (string, error) {

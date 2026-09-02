@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"gitmake/internal/gmerr"
 	"gitmake/internal/history"
 	"gitmake/internal/opjournal"
 	"gitmake/internal/oplock"
@@ -136,7 +137,7 @@ func runApply(o Options) (runErr error) {
 	cwd, _ = filepath.Abs(cwd)
 	plannedWD, _ := filepath.Abs(p.WorkingDirectory)
 	if !samePathForDisplay(cwd, plannedWD) {
-		return fmt.Errorf("plan is stale: it was created for %s, current directory is %s", plannedWD, cwd)
+		return gmerr.New(gmerr.PlanStale, "plan is stale: it was created for %s, current directory is %s", plannedWD, cwd)
 	}
 
 	mode := p.SourceMode
@@ -149,7 +150,7 @@ func runApply(o Options) (runErr error) {
 	}
 	sourceSHA, err := hashSelectedSource(sourceSelection{Mode: mode, Path: p.SourcePath})
 	if err != nil {
-		return fmt.Errorf("plan is stale: source %s is unavailable: %w", mode, err)
+		return gmerr.Wrap(gmerr.PlanStale, err, "plan is stale: source %s is unavailable", mode)
 	}
 	if !strings.EqualFold(sourceSHA, p.SourceSHA256) {
 		return fmt.Errorf("plan is stale: source %s changed after review", mode)

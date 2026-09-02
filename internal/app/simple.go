@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"gitmake/internal/gmerr"
 	"gitmake/internal/planstore"
 )
 
@@ -141,7 +142,7 @@ func runSimplePublish(o Options) error {
 
 func chooseSimpleSource(amb *sourceAmbiguityError) (sourceCandidate, error) {
 	if amb == nil || len(amb.Candidates) == 0 {
-		return sourceCandidate{}, fmt.Errorf("multiple source candidates found")
+		return sourceCandidate{}, gmerr.New(gmerr.SourceAmbiguous, "multiple source candidates found")
 	}
 	if !stdinInteractive() {
 		return sourceCandidate{}, amb

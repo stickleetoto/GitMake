@@ -7,24 +7,12 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$ROOT_DIR/dist" "$TMP/bin" "$TMP/project"
 go build -o "$BIN" "$ROOT_DIR/cmd/gitmake"
 
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
-if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo "Logged in"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo "testuser"; exit 0; fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then echo "HTTP 404 repository not found" >&2; exit 1; fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then echo "HTTP 404: Branch not protected" >&2; exit 1; fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then echo "HTTP 404: Not Found" >&2; exit 1; fi
-echo "fake gh unsupported: $*" >&2
-exit 2
-GH
-chmod +x "$TMP/bin/gh"
+source "$(dirname "${BASH_SOURCE[0]}")/fakegh.sh"
+install_fake_gh "$TMP/bin" "$TMP/remotes"
 
 printf '# v1.2.1 routing hardening\n' > "$TMP/project/README.md"
 printf 'print("routing")\n' > "$TMP/project/main.py"
-export PATH="$TMP/bin:$PATH" GIT_CONFIG_GLOBAL="$TMP/gitconfig" XDG_CACHE_HOME="$TMP/cache"
-source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig" XDG_CACHE_HOME="$TMP/cache"
 require_fake_gh "$BIN"
 git config --global user.name "GitMake V121"
 git config --global user.email "v121@example.test"
