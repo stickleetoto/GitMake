@@ -11,6 +11,7 @@ import (
 	"gitmake/internal/config"
 	"gitmake/internal/discovery"
 	"gitmake/internal/foldersource"
+	"gitmake/internal/gmerr"
 	"gitmake/internal/planstore"
 	"gitmake/internal/securityscan"
 )
@@ -198,7 +199,7 @@ func enforceSecurity(snapshot string, cfg config.Config, hasLFS bool) (securitys
 		for _, f := range report.Findings {
 			names = append(names, f.Path+" ("+f.Kind+")")
 		}
-		return report, fmt.Errorf("potential secrets detected; publish blocked: %s", strings.Join(names, ", "))
+		return report, gmerr.New(gmerr.SecretDetected, "potential secrets detected; publish blocked: %s", strings.Join(names, ", "))
 	}
 	for _, lf := range report.LargeFiles {
 		if lf.Blocking {

@@ -7,50 +7,9 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$ROOT_DIR/dist" "$TMP/bin" "$TMP/remotes" "$TMP/releases"
 go build -o "$BIN" "$ROOT_DIR/cmd/gitmake"
 
-cat > "$TMP/bin/gh" <<'GH'
-#!/usr/bin/env bash
-set -euo pipefail
-root="${FAKE_GH_ROOT:?}"
-if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
-if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo "Logged in"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo "testuser"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then
-  if [[ "${FAKE_GH_REQUIRE_PR:-0}" == "1" ]]; then echo '{"required_pull_request_reviews":{"required_approving_review_count":1}}'; exit 0; fi
-  echo "HTTP 404: Branch not protected" >&2; exit 1
-fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then
-  endpoint="$2"; rest="${endpoint#repos/}"; owner="${rest%%/*}"; rest="${rest#*/}"; repo="${rest%%/*}"; tag="${endpoint#*/git/ref/tags/}"
-  remote="$root/$owner/$repo.git"
-  if [[ -d "$remote" ]] && git --git-dir="$remote" rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then echo '{"ref":"refs/tags/'"$tag"'"}'; exit 0; fi
-  echo "HTTP 404: Not Found" >&2; exit 1
-fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then
-  target="$3"; owner="${target%%/*}"; repo="${target#*/}"; remote="$root/$owner/$repo.git"
-  if [[ ! -d "$remote" ]]; then echo "HTTP 404 repository not found" >&2; exit 1; fi
-  url="https://example.test/$target"
-  if [[ " $* " == *" --jq .url "* ]]; then echo "$url"; exit 0; fi
-  head="$(git --git-dir="$remote" symbolic-ref --short HEAD 2>/dev/null || true)"
-  if [[ -n "$head" ]] && git --git-dir="$remote" rev-parse --verify "$head" >/dev/null 2>&1; then
-    printf '{"nameWithOwner":"%s","url":"%s","defaultBranchRef":{"name":"%s"}}\n' "$target" "$url" "$head"
-  else printf '{"nameWithOwner":"%s","url":"%s","defaultBranchRef":null}\n' "$target" "$url"; fi
-  exit 0
-fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "clone" ]]; then
-  target="$3"; dest="$4"; owner="${target%%/*}"; repo="${target#*/}"; git clone "$root/$owner/$repo.git" "$dest" >/dev/null 2>&1; exit 0
-fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "create" ]]; then
-  target="$3"; shift 3; source=""
-  while (($#)); do case "$1" in --source) source="$2"; shift 2;; --remote|--description) shift 2;; --push|--private|--public|--internal) shift;; *) shift;; esac; done
-  owner="${target%%/*}"; repo="${target#*/}"; remote="$root/$owner/$repo.git"; mkdir -p "$(dirname "$remote")"; git init --bare "$remote" >/dev/null
-  branch="$(git -C "$source" branch --show-current)"; git -C "$source" remote add origin "$remote"; git -C "$source" push -u origin "$branch" >/dev/null 2>&1; git --git-dir="$remote" symbolic-ref HEAD "refs/heads/$branch"; echo "https://example.test/$target"; exit 0
-fi
-if [[ "${1:-}" == "release" && "${2:-}" == "view" ]]; then echo "release not found" >&2; exit 1; fi
-if [[ "${1:-}" == "release" && "${2:-}" == "create" ]]; then echo "https://example.test/release"; exit 0; fi
-echo "fake gh unsupported: $*" >&2; exit 2
-GH
-chmod +x "$TMP/bin/gh"
-export PATH="$TMP/bin:$PATH" FAKE_GH_ROOT="$TMP/remotes" GIT_CONFIG_GLOBAL="$TMP/gitconfig"
-source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/fakegh.sh"
+install_fake_gh "$TMP/bin" "$TMP/remotes"
+export GIT_CONFIG_GLOBAL="$TMP/gitconfig"
 require_fake_gh "$BIN"
 git config --global user.name "GitMake V07"
 git config --global user.email "v07@example.test"

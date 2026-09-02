@@ -1,6 +1,6 @@
 //go:build windows
 
-package winreplace
+package selfupdate
 
 import (
 	"os"

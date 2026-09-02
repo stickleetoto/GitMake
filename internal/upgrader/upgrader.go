@@ -27,6 +27,10 @@ type ReleaseClient interface {
 type Outcome struct {
 	// Tag is the latest published release tag.
 	Tag string
+	// UpdateAvailable reports that the published release is newer than the
+	// running build. It is set even when nothing was installed, so `--check`
+	// and a real upgrade answer the same question the same way.
+	UpdateAvailable bool
 	// Installed reports a replacement that has already completed and been
 	// verified on disk.
 	Installed bool
@@ -40,6 +44,24 @@ type Outcome struct {
 	PreviousImage string
 	// HelperLog is the fallback helper's log path, set only when Scheduled.
 	HelperLog string
+}
+
+// Check reports whether a newer release exists without downloading or
+// replacing anything. Agents and cautious users need to ask that question
+// without committing to a replacement.
+func Check(currentVersion string, releases ReleaseClient) (Outcome, error) {
+	var out Outcome
+	tag, err := releases.LatestReleaseTag(releaseRepo)
+	if err != nil {
+		return out, err
+	}
+	out.Tag = tag
+	cmp, err := compareReleaseVersions(strings.TrimPrefix(strings.TrimSpace(tag), "v"), currentVersion)
+	if err != nil {
+		return out, fmt.Errorf("compare GitMake versions: %w", err)
+	}
+	out.UpdateAvailable = cmp > 0
+	return out, nil
 }
 
 func Upgrade(currentVersion string, releases ReleaseClient) (Outcome, error) {
@@ -57,6 +79,7 @@ func Upgrade(currentVersion string, releases ReleaseClient) (Outcome, error) {
 	if cmp <= 0 {
 		return out, nil
 	}
+	out.UpdateAvailable = true
 
 	assetName, exeName, err := platformAsset(latest)
 	if err != nil {

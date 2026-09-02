@@ -1,4 +1,4 @@
-# GitMake v1.2.6
+# GitMake v1.2.7
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -21,6 +21,8 @@ v1.2.0 adds **One-shot Publish Orchestration** on top of the frozen v1 workflow.
 v1.2.1 hardened protocol routing and approval-state validation. v1.2.2 hardened self-upgrade by using public GitHub Releases over anonymous HTTPS, preserving SHA-256 verification, and refusing accidental downgrades. v1.2.3 introduced Windows locked-executable recovery. v1.2.4 closed the MCP auto-respawn race during Windows replacement. v1.2.5 is a real-world workflow hardening patch: root `--stdin` configuration is now authoritative and fail-closed, security scan output aggregates every supported finding, MCP tool failures preserve the structured CLI error payload, and `gitmake preview` now returns actionable guidance instead of being mistaken for a source path.
 
 v1.2.6 fixes self-upgrade for real. The deferred replacement helper introduced in v1.2.3 was launched with `DETACHED_PROCESS`, which makes `powershell.exe` exit immediately without running the script, so **every staged replacement from v1.2.3 through v1.2.5 was a silent no-op that still reported success**. Replacement is now performed in process with a rename-aside sequence that Windows permits on a running image, is verified before the command returns, never deletes the current executable before the new one is in place, and no longer needs to stop any process. See [Self-upgrade integrity](#self-upgrade-integrity).
+
+v1.2.7 fixes the reasons that defect went unnoticed for three releases: GitMake now has continuous integration across Linux, Windows, and macOS; machine error codes are carried on the error rather than recovered from message text; the two safety-critical packages that had no tests are covered; and the secret scanner recognises the credentials AI-authored projects actually leak. `doctor`, `install`, and `upgrade` gained `--json`, and `gitmake upgrade --check` reports an available update without installing it.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -68,7 +70,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.6
+GitMake 1.2.7
 
 testuser/GambleLM
 Update · public
@@ -303,12 +305,23 @@ The destructive approval remains short-lived, plan-bound, single-use, and cannot
 Before commit/push/release mutation, GitMake checks for:
 
 - high-risk secret paths such as real `.env` files and private key files
-- common private-key, GitHub-token, and AWS credential patterns
+- credential patterns for the services projects actually leak: private keys, GitHub tokens, AWS keys, Anthropic / OpenAI / Hugging Face model keys, Google API keys and OAuth client secrets, GCP service accounts, Stripe, SendGrid, npm, Azure storage keys, and Slack / Discord webhooks
+- structural credentials: a password embedded in a connection string, or a JWT
 - oversized direct-Git files
 - Git LFS markings and `git lfs` availability
 - required-PR branch protection
 - pre-existing bare tags that would make a release ambiguous
 - stale remote state when applying a reviewed plan
+
+Every finding blocks the publish; scanning is fail-closed. Each one reports the file, the kind, the **line**, and a confidence:
+
+```text
+× potential secrets detected; publish blocked: src/client.py (anthropic_api_key), .env (secret_file)
+```
+
+`high` means an issuer-specific shape that essentially cannot occur by accident. `medium` means a structural match — a password inside a connection string, for example — worth reading before you decide. Documentation placeholders such as `postgres://user:password@localhost/db` are not reported.
+
+File contents are scanned in full rather than up to a size cutoff, so a credential buried in a large log or dump is still found. All findings are reported together: fixing one no longer reveals the next on the following run.
 
 Example configuration:
 
@@ -542,6 +555,8 @@ Recent publish/apply audit records include success/failure, repository, mode, ch
 ```text
 gitmake upgrade
 ```
+
+> **Coming from v1.2.5 or earlier?** `gitmake upgrade` cannot get you off those builds. Staged replacement never ran in v1.2.3–v1.2.5 — that is the bug v1.2.6 fixed — so they cannot replace themselves. Extract the platform package and run `.\gitmake.exe install` (Windows) or `./gitmake install` (Linux/macOS) once, then check `gitmake --version`. From v1.2.6 onward `gitmake upgrade` works normally.
 
 Upgrade discovery and downloads use the public GitHub Release API over HTTPS and do not require GitHub CLI authentication. Release packages are checked against the matching SHA-256 asset before anything on disk is touched. GitMake also refuses to replace a newer local build with an older published release.
 

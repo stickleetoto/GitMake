@@ -4,11 +4,12 @@ package installer
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"gitmake/internal/selfupdate"
 )
 
 const profileBegin = "# >>> GitMake PATH >>>"
@@ -66,30 +67,13 @@ func InstallSibling(name string) (InstallResult, error) {
 	return InstallResult{Target: target, PathAdded: added}, nil
 }
 
+// copyExecutable installs src at dst through the same rename-aside sequence
+// Windows uses. POSIX allows replacing a running executable's directory entry,
+// so no deferred helper is ever needed here, but sharing the primitive means
+// one implementation is tested rather than two behaving almost alike.
 func copyExecutable(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("open GitMake executable: %w", err)
-	}
-	defer in.Close()
-	tmp := dst + ".new"
-	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(tmp)
-		return closeErr
-	}
-	_ = os.Chmod(tmp, 0o755)
-	if err := os.Rename(tmp, dst); err != nil {
-		_ = os.Remove(tmp)
+	selfupdate.SweepBackups(dst)
+	if _, err := selfupdate.ReplaceExecutable(src, dst); err != nil {
 		return fmt.Errorf("install GitMake: %w", err)
 	}
 	return nil

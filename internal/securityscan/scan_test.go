@@ -57,14 +57,26 @@ func TestLargeFileMarkedLFSIsNotBlocking(t *testing.T) {
 	}
 }
 
+// TestScannerTestFixturesDoNotContainLiteralSecretSignatures checks every test
+// source in this package, not just this file: a fixture written as a literal
+// credential anywhere here blocks GitMake's own publish.
 func TestScannerTestFixturesDoNotContainLiteralSecretSignatures(t *testing.T) {
-	data, err := os.ReadFile("scan_test.go")
+	sources, err := filepath.Glob("*_test.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range contentRules {
-		if rule.re.Match(data) {
-			t.Fatalf("security scanner test source contains a literal %s signature and would block GitMake self-publish", rule.kind)
+	if len(sources) == 0 {
+		t.Fatal("no test sources found to check")
+	}
+	for _, source := range sources {
+		data, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rule := range contentRules {
+			if findMatch(rule, data) >= 0 {
+				t.Fatalf("%s contains a literal %s signature and would block GitMake self-publish; build the fixture from fragments instead", source, rule.kind)
+			}
 		}
 	}
 }
