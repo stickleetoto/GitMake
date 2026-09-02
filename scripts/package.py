@@ -35,7 +35,7 @@ EXAMPLES = ["examples/gitmake.folder.json", "examples/gitmake.json"]
 
 # Extra top-level files that belong in the source package.
 SOURCE_EXTRA = [
-    ".gitignore", "INSTALL_GITMAKE.bat", "RUN_GITMAKE.bat",
+    ".gitignore", ".gitattributes", "INSTALL_GITMAKE.bat", "RUN_GITMAKE.bat",
     "build.bat", "build.ps1", "go.mod",
 ]
 SOURCE_DIRS = ["cmd", "internal", "scripts", "examples", ".github"]
