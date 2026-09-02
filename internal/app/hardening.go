@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"gitmake/internal/gmerr"
 	"gitmake/internal/planstore"
 )
 
@@ -35,6 +36,20 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 	if state != nil {
 		out.Stage = state.Stage
 	}
+
+	// An error that carries its own code is authoritative. Message matching
+	// below is the compatibility path for sites not yet converted: it is
+	// reached only when nothing in the chain declared a code, and every code it
+	// can still produce is pinned by TestClassifyMachineError.
+	if code := gmerr.CodeOf(err); code != "" {
+		if recoverable, action, ok := gmerr.Guidance(code); ok {
+			out.Code = string(code)
+			out.Recoverable = recoverable
+			out.SuggestedAction = action
+			return out
+		}
+	}
+
 	switch {
 	case strings.Contains(lower, "potential secrets detected"):
 		out.Code = "SECRET_DETECTED"
@@ -112,7 +127,17 @@ func classifyMachineError(err error, state *PipelineState) *MachineError {
 		out.Code = "UPGRADE_INTEGRITY_FAILED"
 		out.Recoverable = true
 		out.SuggestedAction = "Do not install the downloaded build; retry later or verify the GitHub Release assets manually."
-	case strings.Contains(lower, "config") || strings.Contains(lower, "schema_version"):
+	// Configuration failures now carry their own code, so this pattern no
+	// longer has to be a catch-all. It used to match the bare word "config",
+	// which reported unrelated failures as CONFIG_INVALID: "read-only mode
+	// blocks gitmake config write" and an I/O error from "hash config: ..."
+	// both claimed the user's gitmake.json was malformed.
+	case strings.Contains(lower, "schema_version") ||
+		strings.Contains(lower, "gitmake.json") ||
+		strings.Contains(lower, "parse config") ||
+		strings.Contains(lower, "config validation") ||
+		strings.Contains(lower, "config stdin") ||
+		strings.Contains(lower, "invalid config"):
 		out.Code = "CONFIG_INVALID"
 		out.Recoverable = true
 		out.SuggestedAction = "Fix gitmake.json or run `gitmake init` to recreate it."

@@ -1,4 +1,4 @@
-package winreplace
+package selfupdate
 
 import (
 	"os"

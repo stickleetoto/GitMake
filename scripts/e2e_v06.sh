@@ -63,7 +63,9 @@ p.stdin.close(); p.wait(timeout=5)
 p=start(["mcp"])
 r=rpc(p,"initialize",{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test","version":"1"}})
 assert r["result"]["serverInfo"]["name"]=="gitmake", r
-assert r["result"]["serverInfo"]["version"]=="1.0.0", r
+# Pin the v1 contract, not a patch number. v1.2.1 relaxed two assertions
+# like this one and missed this third, which has failed since v1.0.1.
+assert r["result"]["serverInfo"]["version"].startswith("1."), r
 p.stdin.close(); p.wait(timeout=5)
 
 print("V06_MCP_E2E_PASS")

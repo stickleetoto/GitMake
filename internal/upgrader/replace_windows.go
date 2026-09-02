@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"gitmake/internal/winreplace"
+	"gitmake/internal/selfupdate"
 )
 
 // applyReplacement installs newExe at target.
@@ -17,15 +17,15 @@ import (
 // command returns. The detached helper survives only as a fallback for the
 // rare case where the rename itself is refused, and it is now started in a way
 // that actually runs.
-func applyReplacement(newExe, target string) (res winreplace.Result, scheduled bool, helperLog string, err error) {
-	winreplace.SweepBackups(target)
+func applyReplacement(newExe, target string) (res selfupdate.Result, scheduled bool, helperLog string, err error) {
+	selfupdate.SweepBackups(target)
 
-	res, replaceErr := winreplace.ReplaceExecutable(newExe, target)
+	res, replaceErr := selfupdate.ReplaceExecutable(newExe, target)
 	if replaceErr == nil {
 		return res, false, "", nil
 	}
 
-	logPath, stageErr := winreplace.Stage(newExe, target, os.Getpid())
+	logPath, stageErr := selfupdate.Stage(newExe, target, os.Getpid())
 	if stageErr != nil {
 		return res, false, logPath, fmt.Errorf("replace GitMake executable: %v; deferred helper also failed: %w", replaceErr, stageErr)
 	}

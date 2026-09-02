@@ -24,7 +24,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.6"
+const Version = "1.2.7"
 
 type Options struct {
 	Command       string
@@ -49,6 +49,7 @@ type Options struct {
 	Destructive   bool
 	AIClient      string
 	ExpertHelp    bool
+	CheckOnly     bool
 	State         *PipelineState
 }
 
@@ -76,7 +77,7 @@ func Main(args []string) int {
 
 	// AI/config/discovery subcommands own their JSON schema because agents consume
 	// these files directly as capability/installation metadata.
-	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "ai-setup" || opts.Command == "ai-status" || opts.Command == "ai-remove" || opts.Command == "discover" || opts.Command == "inspect" || opts.Command == "plan" || opts.Command == "approve" || opts.Command == "history" || opts.Command == "config") {
+	if opts.JSON && (opts.Command == "ai-describe" || opts.Command == "ai-install" || opts.Command == "ai-setup" || opts.Command == "ai-status" || opts.Command == "ai-remove" || opts.Command == "discover" || opts.Command == "inspect" || opts.Command == "plan" || opts.Command == "approve" || opts.Command == "history" || opts.Command == "config" || opts.Command == "doctor" || opts.Command == "install" || opts.Command == "upgrade") {
 		if err := Run(opts); err != nil {
 			_ = emitJSON(MachineResult{Schema: "gitmake.result/v1", OK: false, Version: Version, Command: opts.Command, ExitCode: 1, Error: classifyMachineError(err, opts.State)})
 			return 1
@@ -204,6 +205,7 @@ func parseArgs(args []string) (Options, error) {
 	fs.StringVar(&o.ApprovalToken, "approval", "", "deprecated pre-1.0 approval token for MCP plan apply")
 	fs.BoolVar(&o.Destructive, "destructive", false, "explicitly approve a plan classified as destructive")
 	fs.BoolVar(&o.ExpertHelp, "expert", false, "show expert/low-level commands with gitmake help")
+	fs.BoolVar(&o.CheckOnly, "check", false, "report whether a newer GitMake release exists without installing it")
 	fs.StringVar(&o.AIClient, "client", "claude", "AI client for setup/status/remove: claude or generic")
 	if err := fs.Parse(args); err != nil {
 		return Options{}, err
@@ -214,6 +216,9 @@ func parseArgs(args []string) (Options, error) {
 	}
 	if o.AIWrite && o.Command != "ai-setup" {
 		return Options{}, errors.New("--write is only valid with `gitmake ai setup`")
+	}
+	if o.CheckOnly && o.Command != "upgrade" {
+		return Options{}, errors.New("--check is only valid with `gitmake upgrade`")
 	}
 	if o.Destructive && o.Command != "approve" && o.Command != "apply" {
 		return Options{}, errors.New("--destructive is only valid with `gitmake approve` or `gitmake apply`")
@@ -351,7 +356,7 @@ func Run(o Options) error {
 	case "config":
 		return runConfig(o)
 	case "install":
-		return runInstall()
+		return runInstall(o)
 	case "upgrade":
 		return runUpgrade(o)
 	case "init":
@@ -429,6 +434,7 @@ AI/MCP commands:
 Install/update:
   gitmake install             Install GitMake for the current user
   gitmake upgrade             Upgrade from the latest GitHub Release
+  gitmake upgrade --check     Report whether a newer release exists, install nothing
 
 Common options:
   --dry-run       Preview without changing GitHub
@@ -517,78 +523,54 @@ func runInit(o Options) error {
 	return runInitWizard(cfg, configPath, label, o.Yes)
 }
 
-func runInstall() error {
-	fmt.Printf("GitMake %s · Install\n\n", Version)
+func runInstall(o Options) error {
 	result, err := installer.InstallSelf()
 	if err != nil {
 		return err
 	}
-	if result.ReplacementStaged {
-		fmt.Println("✓ Replacement staged")
-		fmt.Println("  " + result.Target)
-		fmt.Println("  The installed GitMake executable is currently in use.")
-		fmt.Println("  After this command closes, GitMake will stop only processes using that exact installed executable and finish replacement.")
-		if result.ReplacementLog != "" {
-			fmt.Println("  Helper log: " + result.ReplacementLog)
-		}
-	} else {
-		fmt.Println("✓ Installed")
-		fmt.Println("  " + result.Target)
+	report := InstallReport{
+		Schema:               "gitmake.install/v1",
+		OK:                   true,
+		Target:               result.Target,
+		ReplacementScheduled: result.ReplacementStaged,
+		ReplacementLog:       result.ReplacementLog,
+		PathAdded:            result.PathAdded,
 	}
-	if result.PathAdded {
-		fmt.Println("✓ Added to your user PATH")
-		fmt.Println("\nOpen a new PowerShell/Terminal window, then run:\n  gitmake doctor")
-	} else {
-		fmt.Println("✓ User PATH already contains GitMake")
+	if o.JSON {
+		return emitJSON(report)
 	}
+	renderInstallReport(report)
 	return nil
 }
 
 func runUpgrade(o Options) error {
-	fmt.Printf("GitMake %s · Upgrade\n\n", Version)
-	if o.Verbose {
-		fmt.Println("$ public GitHub Release API")
-	}
 	releases := upgrader.NewPublicReleaseClient()
-	out, err := upgrader.Upgrade(Version, releases)
+	report := UpgradeReport{Schema: "gitmake.upgrade/v1", CurrentVersion: Version, CheckOnly: o.CheckOnly}
+
+	var out upgrader.Outcome
+	var err error
+	if o.CheckOnly {
+		out, err = upgrader.Check(Version, releases)
+	} else {
+		out, err = upgrader.Upgrade(Version, releases)
+	}
 	if err != nil {
 		return err
 	}
-	if !out.Installed && !out.Scheduled {
-		fmt.Printf("✓ GitMake is up to date (current %s, GitHub latest %s)\n", Version, out.Tag)
-		return nil
-	}
 
-	fmt.Printf("✓ Downloaded %s\n", out.Tag)
-	fmt.Println("✓ SHA-256 verified")
-	if out.Scheduled {
-		// Never report an install that has not actually happened yet.
-		fmt.Println("· Replacement scheduled after this process exits")
-		fmt.Printf("  %s\n", out.Target)
-		if out.HelperLog != "" {
-			fmt.Printf("  Log: %s\n", out.HelperLog)
-		}
-		fmt.Println()
-		fmt.Println("  Verify once this command has closed:")
-		fmt.Printf("  \"%s\" --version\n", out.Target)
-		return nil
-	}
+	report.OK = true
+	report.LatestTag = out.Tag
+	report.UpdateAvailable = out.UpdateAvailable
+	report.Installed = out.Installed
+	report.ReplacementScheduled = out.Scheduled
+	report.Target = out.Target
+	report.PreviousImage = out.PreviousImage
+	report.HelperLog = out.HelperLog
 
-	fmt.Printf("✓ Installed %s\n", out.Tag)
-	fmt.Printf("  %s\n", out.Target)
-	if out.PreviousImage != "" {
-		fmt.Println("  The previous build is still running elsewhere; its file is removed on a later run.")
+	if o.JSON {
+		return emitJSON(report)
 	}
-	if dir := installer.InstallDir(); dir != "" {
-		installed := filepath.Join(dir, "gitmake"+exeSuffix())
-		if !samePathForDisplay(out.Target, installed) {
-			// Upgrading a copy outside the install directory is legitimate,
-			// but the user must not believe the PATH command was updated.
-			fmt.Printf("\n! This is not the installed copy at %s\n", installed)
-			fmt.Println("  Run 'gitmake install' from the upgraded executable to update the PATH command.")
-		}
-	}
-	fmt.Println("\nRun: gitmake --version")
+	renderUpgradeReport(report, o.Verbose)
 	return nil
 }
 
@@ -600,90 +582,18 @@ func exeSuffix() string {
 }
 
 func runDoctor(o Options) error {
-	fmt.Printf("GitMake Doctor · %s\n\n", Version)
-	run := runner.Runner{Verbose: o.Verbose}
-	issues := 0
-	check := func(label string, ok bool, detail string) {
-		if ok {
-			fmt.Printf("✓ %-16s %s\n", label, detail)
-		} else {
-			fmt.Printf("× %-16s %s\n", label, detail)
-			issues++
+	report := collectDoctorReport(o)
+	if o.JSON {
+		if err := emitJSON(report); err != nil {
+			return err
 		}
-	}
-	info := func(label, detail string) {
-		fmt.Printf("· %-16s %s\n", label, detail)
-	}
-
-	gitVer, err := run.Run("", "git", "--version")
-	check("Git", err == nil && gitVer.Code == 0, firstNonEmpty(gitVer.Stdout, "not found"))
-	ghVer, err := run.Run("", "gh", "--version")
-	ghOK := err == nil && ghVer.Code == 0
-	check("GitHub CLI", ghOK, firstLine(firstNonEmpty(ghVer.Stdout, "not found")))
-
-	login := "not signed in"
-	authOK := false
-	if ghOK {
-		if res, e := run.Run("", "gh", "auth", "status", "--hostname", "github.com"); e == nil && res.Code == 0 {
-			authOK = true
-			if u, e2 := run.Run("", "gh", "api", "user", "--jq", ".login"); e2 == nil && u.Code == 0 {
-				login = strings.TrimSpace(u.Stdout)
-			} else {
-				login = "signed in"
-			}
-		}
-	}
-	check("GitHub login", authOK, login)
-
-	name, _ := run.Run("", "git", "config", "--global", "--get", "user.name")
-	email, _ := run.Run("", "git", "config", "--global", "--get", "user.email")
-	identOK := name.Code == 0 && email.Code == 0 && strings.TrimSpace(name.Stdout) != "" && strings.TrimSpace(email.Stdout) != ""
-	ident := "not configured"
-	if identOK {
-		ident = strings.TrimSpace(name.Stdout) + " <" + strings.TrimSpace(email.Stdout) + ">"
-	}
-	check("Git identity", identOK, ident)
-
-	pathStatus := installer.GetPathStatus()
-	installDetail := pathStatus.InstallTarget
-	if installDetail == "" {
-		installDetail = "installation target unavailable"
-	}
-	if !pathStatus.InstalledBinary && pathStatus.InstallTarget != "" {
-		installDetail = "not installed (target: " + pathStatus.InstallTarget + ")"
-	}
-	check("GitMake install", pathStatus.InstalledBinary, installDetail)
-	check("CLI command", pathStatus.Healthy(), pathStatusDetail(pathStatus))
-	if pathStatus.InstalledBinary && pathStatus.UserPathHasInstall && !pathStatus.CommandAvailable && !pathStatus.CurrentIsInstalledCopy {
-		info("Current shell", "user PATH is registered; reopen the terminal to refresh command resolution")
-	}
-	if pathStatus.ResolvedPath != "" && pathStatus.InstallTarget != "" && !samePathForDisplay(pathStatus.ResolvedPath, pathStatus.InstallTarget) {
-		info("Resolved copy", pathStatus.ResolvedPath+" (different from the standard install target)")
-	}
-
-	cwd, _ := os.Getwd()
-	if _, err := os.Stat(filepath.Join(cwd, "gitmake.json")); err == nil {
-		check("Project config", true, filepath.Join(cwd, "gitmake.json"))
 	} else {
-		info("Project config", "not present in this folder (optional)")
+		renderDoctorReport(report)
 	}
-
-	fmt.Println()
-	if issues == 0 {
-		fmt.Println("Everything looks good.")
+	if report.OK {
 		return nil
 	}
-	fmt.Printf("%d issue(s) found.\n", issues)
-	if !authOK && ghOK {
-		fmt.Println("Run: gh auth login")
-	}
-	if !identOK {
-		fmt.Println("Set: git config --global user.name ... and user.email ...")
-	}
-	if !pathStatus.Healthy() || !pathStatus.InstalledBinary {
-		fmt.Println("Install: gitmake install")
-	}
-	return fmt.Errorf("doctor found %d issue(s)", issues)
+	return fmt.Errorf("doctor found %d issue(s)", report.Issues)
 }
 
 func pathStatusDetail(s installer.PathStatus) string {

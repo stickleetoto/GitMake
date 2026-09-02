@@ -6,19 +6,8 @@ trap 'rm -rf "$TMP"' EXIT
 BIN="$TMP/gitmake"
 (cd "$ROOT" && go build -trimpath -o "$BIN" ./cmd/gitmake)
 mkdir -p "$TMP/fakebin"
-cat > "$TMP/fakebin/gh" <<'GH'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
-if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo "Logged in"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo "testuser"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then echo "HTTP 404: Branch not protected" >&2; exit 1; fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then echo "HTTP 404: Not Found" >&2; exit 1; fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then echo "repository not found (HTTP 404)" >&2; exit 1; fi
-echo "unexpected gh args: $*" >&2
-exit 2
-GH
-chmod +x "$TMP/fakebin/gh"
+source "$(dirname "${BASH_SOURCE[0]}")/fakegh.sh"
+install_fake_gh "$TMP/fakebin" "$TMP/remotes"
 
 D="$TMP/project"
 mkdir -p "$D"
@@ -34,10 +23,9 @@ cat > "$TMP/stdin.json" <<'JSON'
 JSON
 
 # 1. Root --stdin is authoritative ephemeral config, not silently ignored.
-source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
-PATH="$TMP/fakebin:$PATH" require_fake_gh "$BIN"
+require_fake_gh "$BIN"
 
-(cd "$D" && PATH="$TMP/fakebin:$PATH" "$BIN" --stdin --dry-run --read-only --json < "$TMP/stdin.json" > "$TMP/stdin-ok.json")
+(cd "$D" && "$BIN" --stdin --dry-run --read-only --json < "$TMP/stdin.json" > "$TMP/stdin-ok.json")
 python3 - "$TMP/stdin-ok.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -51,7 +39,7 @@ assert not __import__('os').path.exists(__import__('os').path.join(__import__('o
 PY
 
 # 2. Malformed --stdin fails closed with CONFIG_INVALID.
-if (cd "$D" && printf 'this is not json at all {{{' | PATH="$TMP/fakebin:$PATH" "$BIN" --stdin --dry-run --read-only --json > "$TMP/stdin-bad.json"); then
+if (cd "$D" && printf 'this is not json at all {{{' | "$BIN" --stdin --dry-run --read-only --json > "$TMP/stdin-bad.json"); then
   echo "malformed stdin unexpectedly succeeded" >&2
   exit 51
 fi
@@ -73,7 +61,7 @@ slack='xox'+'b-'+'1234567890-abcdefghijklmnopqrstuv'
 open(os.path.join(d,'leak_one.txt'),'w',encoding='utf-8').write(aws+'\n'+gh+'\n')
 open(os.path.join(d,'leak_two.txt'),'w',encoding='utf-8').write(slack+'\n')
 PYSECRETS
-if (cd "$D" && PATH="$TMP/fakebin:$PATH" "$BIN" --stdin --dry-run --read-only --json < "$TMP/stdin.json" > "$TMP/secrets.json"); then
+if (cd "$D" && "$BIN" --stdin --dry-run --read-only --json < "$TMP/stdin.json" > "$TMP/secrets.json"); then
   echo "secret preview unexpectedly succeeded" >&2
   exit 52
 fi
@@ -94,7 +82,7 @@ assert len(findings) >= 3, findings
 PY
 
 # 4. MCP preview preserves the CLI machine error payload instead of exit-code-only text.
-PATH="$TMP/fakebin:$PATH" "$BIN" mcp <<EOF_MCP > "$TMP/mcp.out"
+"$BIN" mcp <<EOF_MCP > "$TMP/mcp.out"
 {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"gitmake_preview","arguments":{"project_dir":"$D"}}}
 EOF_MCP
 python3 - "$TMP/mcp.out" <<'PY'

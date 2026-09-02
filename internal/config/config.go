@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"gitmake/internal/gmerr"
 )
 
 const CurrentSchemaVersion = 1
@@ -86,10 +88,10 @@ type ReleaseConfig struct {
 func Load(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return Config{}, fmt.Errorf("open config: %w", err)
+		return Config{}, gmerr.Wrap(gmerr.ConfigInvalid, err, "open config")
 	}
 	if len(data) >= 2 && ((data[0] == 0xFF && data[1] == 0xFE) || (data[0] == 0xFE && data[1] == 0xFF)) {
-		return Config{}, fmt.Errorf("parse config: gitmake.json must be UTF-8, not UTF-16")
+		return Config{}, gmerr.New(gmerr.ConfigInvalid, "parse config: gitmake.json must be UTF-8, not UTF-16")
 	}
 	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 
@@ -98,19 +100,19 @@ func Load(path string) (Config, error) {
 
 	var c Config
 	if err := dec.Decode(&c); err != nil {
-		return Config{}, fmt.Errorf("parse config: %w", err)
+		return Config{}, gmerr.Wrap(gmerr.ConfigInvalid, err, "parse config")
 	}
 	var trailing any
 	if err := dec.Decode(&trailing); err != io.EOF {
 		if err == nil {
-			return Config{}, fmt.Errorf("parse config: multiple JSON values are not allowed")
+			return Config{}, gmerr.New(gmerr.ConfigInvalid, "parse config: multiple JSON values are not allowed")
 		}
-		return Config{}, fmt.Errorf("parse config trailing content: %w", err)
+		return Config{}, gmerr.Wrap(gmerr.ConfigInvalid, err, "parse config trailing content")
 	}
 
 	applyDefaults(&c)
 	if err := c.Validate(); err != nil {
-		return Config{}, fmt.Errorf("config validation: %w", err)
+		return Config{}, gmerr.Wrap(gmerr.ConfigInvalid, err, "config validation")
 	}
 	return c, nil
 }
@@ -165,7 +167,14 @@ func applyDefaults(c *Config) {
 	}
 }
 
+// Validate reports configuration problems as CONFIG_INVALID. Tagging them
+// here means the schema rules below stay plain error text: the machine code no
+// longer depends on any of their wording.
 func (c Config) Validate() error {
+	return gmerr.Wrap(gmerr.ConfigInvalid, c.validate(), "")
+}
+
+func (c Config) validate() error {
 	if c.SchemaVersion != CurrentSchemaVersion {
 		return fmt.Errorf("unsupported schema_version %d (supported: %d)", c.SchemaVersion, CurrentSchemaVersion)
 	}

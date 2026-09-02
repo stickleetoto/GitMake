@@ -19,10 +19,13 @@ esac
 BIN="$TMP/gitmake$EXE"
 (cd "$ROOT" && go build -trimpath -o "$BIN" ./cmd/gitmake)
 
-# 1. The build under test is v1.2.6.
+# 1. The binary reports the version the source declares. Pinning a literal
+#    patch number here only breaks the suite on the next release, so read the
+#    expected value from the source of truth instead.
+EXPECTED="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' "$ROOT/internal/app/app.go")"
 VERSION="$("$BIN" --version)"
-if [[ "$VERSION" != "gitmake 1.2.6" ]]; then
-  echo "unexpected version: $VERSION" >&2
+if [[ -z "$EXPECTED" || "$VERSION" != "gitmake $EXPECTED" ]]; then
+  echo "version mismatch: binary says '$VERSION', source declares '$EXPECTED'" >&2
   exit 60
 fi
 
@@ -65,7 +68,7 @@ fi
 # 4. Process-level replacement gates. These build real executables, hold them
 #    open with live processes, and require the canonical path to report the new
 #    version afterwards.
-(cd "$ROOT" && go test -count=1 ./internal/winreplace/ ./internal/upgrader/ ./internal/installer/)
+(cd "$ROOT" && go test -count=1 ./internal/selfupdate/ ./internal/upgrader/ ./internal/installer/)
 
 # 5. The v1.2.5 fixes must not regress.
 D="$TMP/project"

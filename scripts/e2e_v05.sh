@@ -84,28 +84,8 @@ PY
 
 # 8. AI-safe publish preview returns structured pipeline data and performs no GitHub mutation.
 mkdir -p "$TMP/fakebin" "$TMP/preview"
-cat > "$TMP/fakebin/gh" <<'GH'
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "${1:-}" == "--version" ]]; then echo "gh version 2.fake"; exit 0; fi
-if [[ "${1:-}" == "auth" && "${2:-}" == "status" ]]; then echo "Logged in"; exit 0; fi
-if [[ "${1:-}" == "api" && "${2:-}" == "user" ]]; then echo "testuser"; exit 0; fi
-# GitMake v0.7 branch/tag preflight support for the fake GitHub CLI.
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/branches/*/protection ]]; then
-  if [[ "${FAKE_GH_REQUIRE_PR:-0}" == "1" ]]; then echo '{"required_pull_request_reviews":{"required_approving_review_count":1}}'; exit 0; fi
-  echo "HTTP 404: Branch not protected" >&2; exit 1
-fi
-if [[ "${1:-}" == "api" && "${2:-}" == repos/*/git/ref/tags/* ]]; then
-  endpoint="${2:-}"; rest="${endpoint#repos/}"; owner="${rest%%/*}"; rest="${rest#*/}"; repo="${rest%%/*}"; tag="${endpoint#*/git/ref/tags/}"
-  remote="$root/$owner/$repo.git"
-  if [[ -d "$remote" ]] && git --git-dir="$remote" rev-parse --verify "refs/tags/$tag" >/dev/null 2>&1; then echo '{"ref":"refs/tags/'"$tag"'"}'; exit 0; fi
-  echo "HTTP 404: Not Found" >&2; exit 1
-fi
-if [[ "${1:-}" == "repo" && "${2:-}" == "view" ]]; then echo "repository not found (HTTP 404)" >&2; exit 1; fi
-echo "unexpected gh args: $*" >&2
-exit 2
-GH
-chmod +x "$TMP/fakebin/gh"
+source "$(dirname "${BASH_SOURCE[0]}")/fakegh.sh"
+install_fake_gh "$TMP/fakebin" "$TMP/remotes"
 python3 - "$TMP/preview/project.zip" <<'PY'
 import sys,zipfile
 with zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED) as z:
@@ -119,10 +99,9 @@ cat > "$TMP/preview/gitmake.json" <<'JSON'
   "git": {"branch": "main"}
 }
 JSON
-source "$(dirname "${BASH_SOURCE[0]}")/require_fake_gh.sh"
-PATH="$TMP/fakebin:$PATH" require_fake_gh "$BIN"
+require_fake_gh "$BIN"
 
-(cd "$TMP/preview" && PATH="$TMP/fakebin:$PATH" "$BIN" --dry-run --read-only --json > preview.json)
+(cd "$TMP/preview" && "$BIN" --dry-run --read-only --json > preview.json)
 python3 - "$TMP/preview/preview.json" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1],encoding='utf-8'))

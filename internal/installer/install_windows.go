@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gitmake/internal/winreplace"
+	"gitmake/internal/selfupdate"
 )
 
 const productDir = "GitMake"
@@ -112,14 +112,14 @@ func copyFile(source, target string) error {
 }
 
 func replaceOrStageWindows(tmp, target string) (bool, string, error) {
-	winreplace.SweepBackups(target)
+	selfupdate.SweepBackups(target)
 
 	// Rename-aside works even when the target is the image of a running
 	// process, so this succeeds for a first install, an update while MCP stdio
 	// servers are live, and a self-install alike. The target is never deleted
 	// before the replacement is in place, so a failure cannot leave the
 	// install directory without gitmake.exe.
-	_, replaceErr := winreplace.ReplaceExecutable(tmp, target)
+	_, replaceErr := selfupdate.ReplaceExecutable(tmp, target)
 	if replaceErr == nil {
 		_ = os.Remove(tmp)
 		return false, "", nil
@@ -129,14 +129,14 @@ func replaceOrStageWindows(tmp, target string) (bool, string, error) {
 	// than the installed target), complete replacement synchronously so the
 	// user gets a truthful success result.
 	if current, currentErr := os.Executable(); currentErr == nil && !samePath(current, target, true) {
-		logPath, syncErr := winreplace.ReplaceNow(tmp, target)
+		logPath, syncErr := selfupdate.ReplaceNow(tmp, target)
 		if syncErr == nil {
 			return false, logPath, nil
 		}
 		return false, logPath, fmt.Errorf("replace installed executable (%v; synchronous helper failed: %w)", replaceErr, syncErr)
 	}
 
-	logPath, stageErr := winreplace.Stage(tmp, target, os.Getpid())
+	logPath, stageErr := selfupdate.Stage(tmp, target, os.Getpid())
 	if stageErr != nil {
 		return false, logPath, fmt.Errorf("replace installed executable (%v; deferred helper failed: %w)", replaceErr, stageErr)
 	}

@@ -1,4 +1,61 @@
+## v1.2.7 — Verification, Error Contract, and Secret Coverage
+
+v1.2.6 fixed the updater. This release fixes the reasons the updater defect went unnoticed through three releases, and closes the largest gap in the safety gate GitMake exists to provide. No publishing, approval, plan, config, project-identity, or MCP interface changes.
+
+### Verification infrastructure
+
+The updater defect shipped three times because the gates could not see it. That is now addressed directly.
+
+- **Added continuous integration.** There was none. `.github/workflows/ci.yml` runs gofmt, build, vet, and tests on Linux, Windows, and macOS; the race detector where cgo is available; the E2E suites; a cross-platform build of every published target; and a packaging job. Tests run twice per platform, which is the cheapest guard against the once-per-machine failure described above.
+- **Packaging is code.** `scripts/package.py` builds every release artifact, the source ZIP, the checksum manifest, and the self-publish folder from a clean tree. Previously this existed only as manual steps, which is how v1.2.5 shipped a stray empty file and a CRLF checksum manifest. CI runs it on every change, verifies the manifest, then rebuilds and re-tests GitMake from the produced source ZIP.
+- **Replaced the shell GitHub CLI stubs with a compiled one.** `internal/testsupport/fakegh` is a real executable, so `exec.LookPath` finds it on Windows. The sixteen extensionless shell stubs it replaces were invisible to GitMake there, which silently fell through to the real authenticated `gh` and created live repositories during a Windows test run. Windows E2E coverage goes from three suites to seven, and `e2e_v121` now genuinely passes instead of passing while querying a real account.
+- `e2e_v03.sh` had been dead since v1.0: it asserted a pre-1.0 message and assumed publishing an empty folder exits zero, so under `set -e` it could never reach a second assertion. Partially corrected; the rest of that suite still predates interactive confirmation.
+
+### Machine error codes are carried, not guessed
+
+`--json` error codes are a frozen v1 contract that was reconstructed by matching substrings of human-readable messages, with no test. Rewording any error could silently reclassify it, and the broadest patterns swallowed unrelated failures: every message merely containing the word "config" was reported as `CONFIG_INVALID`, including `read-only mode blocks gitmake config write` and an I/O failure from `hash config: ...`.
+
+- Added `internal/gmerr`. An error now carries its own code, and the classifier trusts it over any message matching.
+- Converted the configuration, source-selection, secret-scan, project-identity, and plan-staleness failures to coded errors, and narrowed the configuration pattern so it no longer acts as a catch-all.
+- Message matching remains for sites not yet converted, but every code it can still produce is now pinned by a test, so rewording one fails the build instead of changing the contract silently.
+
+### Secret scanning
+
+The scanner knew five credential shapes, which is thin for a tool whose purpose is safe publishing of AI-authored projects. A model provider key, a cloud service account, or a payment key published cleanly.
+
+- Added detection for Anthropic, OpenAI, and Hugging Face keys; Google API keys, OAuth client secrets, and GCP service accounts; Stripe, SendGrid, npm, and Azure storage keys; Slack and Discord webhooks; and PGP/encrypted private key blocks.
+- Added two structural rules: a password embedded in a connection string, and a JWT. Documentation placeholders (`postgres://user:password@localhost/db`, `${DB_PASSWORD}`, `<your-password>`) are rejected so examples do not block a publish.
+- Findings now carry a `confidence` of `high` or `medium`, and the `line` of the first match. Both levels block — scanning stays fail-closed — but the user can see which findings are issuer-specific and which are heuristic, and where to look.
+- **File contents are scanned in full.** Anything over 2 MiB previously had its contents skipped entirely, so a credential in a log or database dump was never examined. Scanning now streams with an overlap window, so a credential straddling a chunk boundary is still found.
+- An Anthropic key is no longer also reported as an OpenAI key.
+- The fixture guard now checks every test source in the package rather than one file, after the new tests demonstrated the gap.
+
+### Coverage on the safety-critical packages
+
+`internal/github` (every remote mutation) and `internal/planstore` (the reviewed plans approval is bound to) both had zero tests.
+
+- `internal/github`: 0% → 69%, driven through the compiled fake CLI so both the arguments GitMake sends and the output it parses are exercised.
+- `internal/planstore`: 0% → 83%, covering the substitution guards in particular — a plan file copied under another id, or written by a future schema, must not load.
+
+### Agent surfaces
+
+GitMake is an AI-first tool, but `doctor`, `install`, and `upgrade` printed only for humans: an agent had to parse prose to learn whether the environment was usable or whether an upgrade had actually landed.
+
+- `gitmake doctor --json` reports every check with its verdict, detail, and the remedies for anything failing (`gitmake.doctor/v1`).
+- `gitmake install --json` reports the target, whether replacement completed or was scheduled, and whether PATH changed (`gitmake.install/v1`).
+- `gitmake upgrade --json` reports the current and latest version, whether an update is available, and whether it was installed or scheduled (`gitmake.upgrade/v1`).
+- Added `gitmake upgrade --check`, which answers whether a newer release exists without downloading or replacing anything.
+- Human output for all three is now rendered from the same report the JSON is built from, so the two cannot drift.
+
+### Unchanged
+
+The publishing pipeline, reviewed-plan and approval semantics, config and plan schemas, project identity, managed sync, MCP tool names, and every safety invariant are untouched. Secret scanning remains fail-closed, checksum verification remains mandatory, and downgrade refusal remains in place.
+
 ## v1.2.6 — Self-Upgrade Actually Replaces the Executable
+
+### Upgrading to this release
+
+`gitmake upgrade` cannot reach v1.2.6 from v1.2.3, v1.2.4, or v1.2.5. Staged replacement never ran in those builds, which is the defect this release fixes, so they cannot replace themselves. Extract the platform package and run `.\gitmake.exe install` (Windows) or `./gitmake install` (Linux/macOS) once, then check `gitmake --version`. Self-upgrade works normally from v1.2.6 onward.
 
 ### Root cause
 
