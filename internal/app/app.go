@@ -708,147 +708,16 @@ func discoveryStateFromReport(r discovery.Report) *DiscoveryState {
 
 func runPublish(o Options) error {
 	started := time.Now()
-	if o.State != nil {
-		o.State.enter("DISCOVER")
-	}
-	cwd, err := os.Getwd()
+
+	in, err := discoverPublishInput(o)
 	if err != nil {
+		if errors.Is(err, errSourceGuidanceShown) {
+			return nil
+		}
 		return err
 	}
-	configPath := resolveConfigPath(cwd, o.ConfigPath)
-
-	// A positional path is the strongest source-selection signal. v0.8 accepts
-	// either a project folder or a ZIP snapshot.
-	explicit, err := explicitSource(cwd, o.SourceArg)
-	if err != nil {
-		return err
-	}
-
-	var cfg config.Config
-	var source sourceSelection
-	configPersisted := false
-	configSource := "file"
-	configExists := false
-	if _, statErr := os.Stat(configPath); statErr == nil {
-		configExists = true
-	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("check config: %w", statErr)
-	}
-
-	if o.Stdin {
-		incoming, readErr := readLimitedStdin()
-		if readErr != nil {
-			return readErr
-		}
-		cfg, err = config.ParseBytes(incoming)
-		if err != nil {
-			return err
-		}
-		configSource = "stdin"
-		source = explicit
-		if source.Path == "" {
-			source, err = configuredSource(configPath, &cfg, true)
-			if err != nil {
-				return err
-			}
-		}
-	} else if configExists {
-		cfg, err = config.Load(configPath)
-		if err != nil {
-			return err
-		}
-		configPersisted = true
-		source = explicit
-		if source.Path == "" {
-			source, err = configuredSource(configPath, &cfg, o.ReadOnly)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		configSource = "inferred"
-		source = explicit
-		if source.Path == "" {
-			source, err = inferSource(cwd)
-			if source.Discovery != nil && o.State != nil {
-				o.State.Discovery = discoveryStateFromReport(*source.Discovery)
-			}
-			if err != nil {
-				// Ambiguity is always a safety decision. Interactive Simple Mode
-				// resolves it before planning; machine/non-interactive callers get a
-				// hard SOURCE_AMBIGUOUS result instead of a guessed source.
-				var amb *sourceAmbiguityError
-				if errors.As(err, &amb) || (source.Discovery != nil && source.Discovery.NeedsInput) {
-					return err
-				}
-				if o.ReadOnly || o.JSON {
-					return err
-				}
-				fmt.Printf("GitMake %s\n\n", Version)
-				fmt.Println("No project source could be selected in this folder.")
-				fmt.Println("\nRun GitMake inside a project folder, or provide a source directly:")
-				fmt.Println("  gitmake .")
-				fmt.Println("  gitmake path\\to\\Project.zip")
-				return nil
-			}
-		}
-
-		cfg, err = configForSelection(configPath, source)
-		if err != nil {
-			return err
-		}
-		// v0.9 is zero-config by default. Missing gitmake.json stays in
-		// memory unless the user explicitly runs `gitmake init` or a config
-		// authoring command. This keeps the simple path free of setup files.
-	}
-
-	source.Path, err = filepath.Abs(source.Path)
-	if err != nil {
-		return fmt.Errorf("resolve source path: %w", err)
-	}
-	memoryUsed := false
-	// Explicit stdin configuration is authoritative. Project memory may still
-	// block an unsafe retarget below, but it must never silently rewrite the
-	// caller's repo/branch/visibility choices.
-	if !configPersisted && configSource != "stdin" {
-		memoryUsed, err = applyFolderProjectMemory(source, &cfg)
-		if err != nil {
-			return err
-		}
-		if memoryUsed {
-			configSource = "project_memory"
-		}
-	}
-	sourceSHA, err := hashSelectedSource(source)
-	if err != nil {
-		return fmt.Errorf("hash source %s: %w", source.Mode, err)
-	}
-	configSHA := ""
-	if configPersisted {
-		configSHA, err = sha256File(configPath)
-		if err != nil {
-			return fmt.Errorf("hash config: %w", err)
-		}
-	} else if configSource == "stdin" {
-		normalized, normErr := config.MarshalNormalized(cfg)
-		if normErr != nil {
-			return normErr
-		}
-		configSHA = sha256Bytes(normalized)
-	}
-	if o.State != nil {
-		o.State.SourceMode = source.Mode
-		o.State.Source = sourceDisplay(source)
-		o.State.SourcePath = source.Path
-		o.State.SourceSHA256 = sourceSHA
-		o.State.Visibility = cfg.Repo.Visibility
-		configState := &ConfigState{Source: configSource, Persisted: configPersisted, SHA256: configSHA}
-		if configPersisted {
-			configState.Path = configPath
-		}
-		o.State.Config = configState
-		o.State.enter("PLAN")
-	}
+	configPath, cfg, source := in.ConfigPath, in.Config, in.Source
+	configSource, sourceSHA, memoryUsed := in.ConfigSource, in.SourceSHA256, in.MemoryUsed
 
 	run := runner.Runner{Verbose: o.Verbose}
 	git := gitops.Client{Run: run}
