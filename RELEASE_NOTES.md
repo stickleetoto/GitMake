@@ -1,70 +1,69 @@
-# GitMake v1.2.7 — Verification, Error Contract, and Secret Coverage
+# GitMake v1.2.8 — The Publish Pipeline, Taken Apart
 
-v1.2.6 fixed the updater. This release fixes the reasons that defect went unnoticed through three releases, and closes the largest gap in the safety gate GitMake exists to provide.
+v1.2.7 gave GitMake continuous integration. This release uses it: the publishing pipeline is separated into stages that can be tested individually, and the safety rules it enforces are pinned by tests for the first time.
 
-Nothing about publishing, approval, plans, config, project identity, or MCP changes. `gitmake upgrade` from v1.2.6 installs this normally.
+Nothing about publishing changes. No config, plan, approval, project-identity or MCP interface moves. The E2E suites are the contract, and they were run at every step.
 
-## Verification infrastructure
+## A safety promise that nothing was checking
 
-The updater bug shipped three times while every gate reported green. The gates were the problem.
+`STABILITY.md` promises specific confirmation friction for each reviewed risk: `--yes` accepts low-risk plans only, a medium-risk plan requires a typed `PUBLISH`, and a destructive one requires a phrase carrying that plan's own suffix.
 
-- **GitMake now has continuous integration.** There was none at all. Every change runs gofmt, build, vet, and tests on Linux, Windows, and macOS; the race detector where cgo is available; the E2E suites; a cross-build of every published target; and a full packaging job. Tests run **twice** per platform, which is the cheapest possible guard against state that survives a run.
-- **Packaging is code, not a procedure.** `scripts/package.py` builds every release artifact, the source ZIP, the checksum manifest, and the self-publish folder from a clean tree. CI then unpacks the produced source ZIP and rebuilds and re-tests GitMake from it. v1.2.5 shipped a stray empty file and a checksum manifest `sha256sum -c` could not read; neither can happen unnoticed now.
-- **The GitHub CLI test stub is a real executable.** The sixteen extensionless shell stubs it replaces were invisible to Go's `exec.LookPath` on Windows, so the suites silently fell through to the real authenticated `gh`. Windows E2E coverage goes from three suites to seven, and one suite that appeared to pass had in fact been querying a live account.
+Nothing tested it. The rules lived inside one function that printed to stdout and read a terminal in the same breath, so the promise and the code could drift apart with nobody noticing. The rules are now separate from the conversation, and the contract is a table:
 
-## Machine error codes are carried, not guessed
+| Reviewed risk | Confirmation | `--yes` |
+| --- | --- | --- |
+| low or unset | `[Y/n]` | accepted |
+| medium | typed `PUBLISH` | refused |
+| high | typed `DELETE-XXXXXX` | refused |
+| destructive | typed `DELETE-XXXXXX` | refused, whatever the level says |
 
-The `--json` error codes are a frozen v1 contract that was reconstructed by matching substrings of human-readable messages, with no test anywhere. Rewording any error could silently reclassify it.
+The destructive phrase carries the plan id and is compared exactly, so a confirmation cannot be moved between plans.
 
-The broadest pattern was actively wrong: every message merely containing the word "config" was reported as `CONFIG_INVALID`, so `read-only mode blocks gitmake config write` and an I/O failure from `hash config: ...` both told the user their `gitmake.json` was malformed.
+## runPublish: 295 lines to 47
 
-Errors now carry their own code. Message matching remains for sites not yet converted, but every code it can still produce is pinned by a test: rewording one fails the build instead of changing the contract in silence.
+The publish already had five stages — it announced `DISCOVER`, `PLAN`, `PREPARE`, `SECURITY` and `VALIDATE` as it ran — but all five shared one scope, so none could be read or tested on its own. They are separate now, and `runPublish` reads as what it always was: discover, plan, snapshot, report, apply.
 
-## Secret scanning
+Two things had to be handled rather than moved. The workspace cleanup and the repository lock belong to the whole publish, not to the stage that creates them, so those stages return their cleanup for `runPublish` to defer. And `VALIDATE` turned out to reject nothing — by the time it runs, the snapshot has matched the reviewed hash and the security gate has passed — so it is now named for what it does: report.
 
-The scanner knew five credential shapes. For a tool whose purpose is safe publishing of AI-authored projects, that missed the obvious cases — a model provider key, a cloud service account, or a payment key published cleanly.
+`app.go` drops from 1,320 lines to 1,070.
 
-- Added Anthropic, OpenAI, and Hugging Face keys; Google API keys, OAuth client secrets, and GCP service accounts; Stripe, SendGrid, npm, and Azure storage keys; Slack and Discord webhooks; PGP and encrypted private key blocks.
-- Added two structural rules: a password embedded in a connection string, and a JWT. Documentation placeholders are rejected, so a README example does not block a publish.
-- **File contents are scanned in full.** Anything over 2 MiB previously had its contents skipped entirely, so a credential in a log or a database dump was never examined.
-- Findings now report a `confidence` and the **line** of the first match. Both confidence levels block — scanning stays fail-closed — but you can see which findings are issuer-specific and where to look.
+## Tests where a bug would be worst
 
-## Coverage where a bug is worst
+`internal/app` holds the publishing pipeline and had 26% coverage, because reaching any part of it meant reaching all of it, with a real GitHub account and a terminal. With the stages separate they can be driven against the stubbed GitHub CLI. Coverage is now 42%.
 
-`internal/github` performs every remote mutation and `internal/planstore` holds the reviewed plans that approval is bound to. Both had zero tests.
+The suite now proves, on Windows as well as Linux:
 
-- `internal/github`: 0% → 69%, driven through the compiled fake CLI, so both the arguments GitMake sends and the output it parses are exercised.
-- `internal/planstore`: 0% → 83%, covering the substitution guards in particular: a plan file copied under another id, or written by a future schema, must not load.
+- a repository is created with the expected files and one commit; a second publish reports `UPDATE` with exactly one modification; republishing an unchanged source adds no commit
+- a dry run creates nothing
+- a configured release is created with its assets, and a duplicate tag is refused
+- publishing a folder bound to one repository into a different one stops with `PROJECT_IDENTITY_MISMATCH`
+- managed sync leaves remote-only files alone and removes only what GitMake published
+- a mass deletion is classified destructive and blocked **before** any mutation, while an ordinary five-file cleanup is not
+- an update reports a visibility mismatch and never changes the remote
+- a detected secret blocks the publish while its findings survive, so the user can see what to fix
 
-## Machine surfaces for agents
+## Four E2E suites retired, none of their checks lost
 
-`doctor`, `install`, and `upgrade` printed only for humans, so an agent had to parse prose to learn whether the environment was usable or whether an upgrade had landed.
+v1.2.7 quarantined `e2e_v03`, `v07`, `v072` and `v073`. Each ended in the pre-v1.0 approval flow that printed a copyable token, which v1.0 removed, so they could not run at all.
 
-```bash
-gitmake doctor --json      # every check, its verdict, and the remedies
-gitmake install --json     # target, whether replacement completed, PATH state
-gitmake upgrade --json     # current and latest version, installed or scheduled
-gitmake upgrade --check    # is there a newer release? nothing is downloaded
-```
+Calling them obsolete was too quick: only their tail was. Everything before it asserted behaviour GitMake still has, and quarantining the suites took those checks out of service. They are ported to Go above — where they also run on Windows, which the pty-driven originals never could — and the suites are removed along with the CI quarantine step. Nothing is left permanently red.
 
-Human output for all three is rendered from the same report the JSON is built from, so the two cannot drift.
+## Also fixed
+
+The Windows test job went red on `main` immediately after v1.2.7, having passed locally and on two pull-request runs. Staged replacements keyed their helper script and log on the process id alone, so every replacement in one process shared them and timing decided whether the suite passed. The same collision applied outside tests: two GitMake processes replacing at once shared both files. Each replacement now gets its own.
 
 ## Verification
 
-- `go build ./...`, `go vet ./...`, `go test ./...` — and `go test` a second time, to prove the suite is repeatable
+- `go build`, `go vet`, `go test` — and `go test` again, to prove the suite is repeatable
+- Full CI on Linux, Windows and macOS, including the race detector and the packaging job
 - Windows E2E: `e2e_v05`, `e2e_v051`, `e2e_v052`, `e2e_v121`, `e2e_v123`, `e2e_v124`, `e2e_v126`
-- Release artifacts rebuilt, checksum manifest verified, and GitMake rebuilt and re-tested from the published source ZIP
-- GitMake's own source tree still passes its own secret scan with all nineteen rules active
-
-`go test -race` and the GitHub-CLI-dependent E2E suites run in CI on Linux and macOS; they were not run on the Windows development machine, which has no C compiler and cannot execute the pty-driven suites.
-
-No repository was published during these checks.
+- Every extraction step verified against the full suite and the E2E gates before the next began
 
 ## Upgrading
 
-From v1.2.6, `gitmake upgrade` installs this release normally.
+`gitmake upgrade` installs this release from v1.2.6 or later.
 
-From v1.2.5 or earlier, self-upgrade cannot move you: staged replacement never ran in those builds. Extract the platform package and install once:
+From v1.2.5 or earlier, self-upgrade cannot move you — staged replacement never ran in those builds. Extract the platform package and install once:
 
 ```powershell
 .\gitmake.exe install

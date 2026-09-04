@@ -106,7 +106,7 @@ func runSimplePublish(o Options) error {
 		return nil
 	}
 
-	confirmed, destructive, err := confirmSimplePlan(p, o.Yes)
+	confirmed, destructive, err := confirmPlan(p, o.Yes, terminalPrompter{})
 	if err != nil {
 		return err
 	}

@@ -17,14 +17,12 @@ import (
 	"gitmake/internal/github"
 	"gitmake/internal/gitops"
 	"gitmake/internal/installer"
-	"gitmake/internal/oplock"
 	"gitmake/internal/projectid"
-	"gitmake/internal/runner"
 	"gitmake/internal/syncer"
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.7"
+const Version = "1.2.8"
 
 type Options struct {
 	Command       string
@@ -708,282 +706,34 @@ func discoveryStateFromReport(r discovery.Report) *DiscoveryState {
 
 func runPublish(o Options) error {
 	started := time.Now()
-	if o.State != nil {
-		o.State.enter("DISCOVER")
+
+	in, err := discoverPublishInput(o)
+	if err != nil {
+		if errors.Is(err, errSourceGuidanceShown) {
+			return nil
+		}
+		return err
 	}
-	cwd, err := os.Getwd()
+	cfg, source, sourceSHA := in.Config, in.Source, in.SourceSHA256
+
+	plan, releaseRepoLock, err := planPublishTarget(o, in, &cfg)
+	defer releaseRepoLock()
 	if err != nil {
 		return err
 	}
-	configPath := resolveConfigPath(cwd, o.ConfigPath)
+	git, gh := plan.Git, plan.GitHub
+	target, repoInfo, exists, release := plan.Target, plan.RepoInfo, plan.Exists, plan.Release
 
-	// A positional path is the strongest source-selection signal. v0.8 accepts
-	// either a project folder or a ZIP snapshot.
-	explicit, err := explicitSource(cwd, o.SourceArg)
+	printPlanHeader(in, cfg, plan)
+
+	snap, cleanupWorkspace, err := prepareSnapshot(o, source, cfg, sourceSHA, git.HasLFS())
+	defer cleanupWorkspace()
 	if err != nil {
 		return err
 	}
+	work, snapshot := snap.Workspace, snap.Path
 
-	var cfg config.Config
-	var source sourceSelection
-	configPersisted := false
-	configSource := "file"
-	configExists := false
-	if _, statErr := os.Stat(configPath); statErr == nil {
-		configExists = true
-	} else if !os.IsNotExist(statErr) {
-		return fmt.Errorf("check config: %w", statErr)
-	}
-
-	if o.Stdin {
-		incoming, readErr := readLimitedStdin()
-		if readErr != nil {
-			return readErr
-		}
-		cfg, err = config.ParseBytes(incoming)
-		if err != nil {
-			return err
-		}
-		configSource = "stdin"
-		source = explicit
-		if source.Path == "" {
-			source, err = configuredSource(configPath, &cfg, true)
-			if err != nil {
-				return err
-			}
-		}
-	} else if configExists {
-		cfg, err = config.Load(configPath)
-		if err != nil {
-			return err
-		}
-		configPersisted = true
-		source = explicit
-		if source.Path == "" {
-			source, err = configuredSource(configPath, &cfg, o.ReadOnly)
-			if err != nil {
-				return err
-			}
-		}
-	} else {
-		configSource = "inferred"
-		source = explicit
-		if source.Path == "" {
-			source, err = inferSource(cwd)
-			if source.Discovery != nil && o.State != nil {
-				o.State.Discovery = discoveryStateFromReport(*source.Discovery)
-			}
-			if err != nil {
-				// Ambiguity is always a safety decision. Interactive Simple Mode
-				// resolves it before planning; machine/non-interactive callers get a
-				// hard SOURCE_AMBIGUOUS result instead of a guessed source.
-				var amb *sourceAmbiguityError
-				if errors.As(err, &amb) || (source.Discovery != nil && source.Discovery.NeedsInput) {
-					return err
-				}
-				if o.ReadOnly || o.JSON {
-					return err
-				}
-				fmt.Printf("GitMake %s\n\n", Version)
-				fmt.Println("No project source could be selected in this folder.")
-				fmt.Println("\nRun GitMake inside a project folder, or provide a source directly:")
-				fmt.Println("  gitmake .")
-				fmt.Println("  gitmake path\\to\\Project.zip")
-				return nil
-			}
-		}
-
-		cfg, err = configForSelection(configPath, source)
-		if err != nil {
-			return err
-		}
-		// v0.9 is zero-config by default. Missing gitmake.json stays in
-		// memory unless the user explicitly runs `gitmake init` or a config
-		// authoring command. This keeps the simple path free of setup files.
-	}
-
-	source.Path, err = filepath.Abs(source.Path)
-	if err != nil {
-		return fmt.Errorf("resolve source path: %w", err)
-	}
-	memoryUsed := false
-	// Explicit stdin configuration is authoritative. Project memory may still
-	// block an unsafe retarget below, but it must never silently rewrite the
-	// caller's repo/branch/visibility choices.
-	if !configPersisted && configSource != "stdin" {
-		memoryUsed, err = applyFolderProjectMemory(source, &cfg)
-		if err != nil {
-			return err
-		}
-		if memoryUsed {
-			configSource = "project_memory"
-		}
-	}
-	sourceSHA, err := hashSelectedSource(source)
-	if err != nil {
-		return fmt.Errorf("hash source %s: %w", source.Mode, err)
-	}
-	configSHA := ""
-	if configPersisted {
-		configSHA, err = sha256File(configPath)
-		if err != nil {
-			return fmt.Errorf("hash config: %w", err)
-		}
-	} else if configSource == "stdin" {
-		normalized, normErr := config.MarshalNormalized(cfg)
-		if normErr != nil {
-			return normErr
-		}
-		configSHA = sha256Bytes(normalized)
-	}
-	if o.State != nil {
-		o.State.SourceMode = source.Mode
-		o.State.Source = sourceDisplay(source)
-		o.State.SourcePath = source.Path
-		o.State.SourceSHA256 = sourceSHA
-		o.State.Visibility = cfg.Repo.Visibility
-		configState := &ConfigState{Source: configSource, Persisted: configPersisted, SHA256: configSHA}
-		if configPersisted {
-			configState.Path = configPath
-		}
-		o.State.Config = configState
-		o.State.enter("PLAN")
-	}
-
-	run := runner.Runner{Verbose: o.Verbose}
-	git := gitops.Client{Run: run}
-	gh := github.Client{Run: run}
-	if err := git.Preflight(); err != nil {
-		return err
-	}
-	if err := gh.Preflight(); err != nil {
-		return err
-	}
-
-	owner := cfg.Repo.Owner
-	if owner == "" {
-		owner, err = gh.CurrentUser()
-		if err != nil {
-			return err
-		}
-	}
-	target := owner + "/" + cfg.Repo.Name
-	if err := validateFolderProjectMemory(source, target); err != nil {
-		return err
-	}
-	repoInfo, exists, err := gh.Repo(owner, cfg.Repo.Name)
-	if err != nil {
-		return err
-	}
-	if memoryUsed && exists && strings.TrimSpace(repoInfo.Visibility) != "" {
-		cfg.Repo.Visibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
-	}
-	if o.State != nil {
-		o.State.Visibility = cfg.Repo.Visibility
-		o.State.Repository = target
-		if exists {
-			o.State.Mode = "UPDATE"
-			o.State.RemoteVisibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
-		} else {
-			o.State.Mode = "CREATE"
-		}
-	}
-	if exists && o.CreateOnly {
-		return fmt.Errorf("repository %s already exists (--create-only)", target)
-	}
-	if !exists && o.UpdateOnly {
-		return fmt.Errorf("repository %s does not exist (--update-only)", target)
-	}
-
-	var repoLock *oplock.Lock
-	if !o.DryRun {
-		repoLock, err = oplock.Acquire("repo:" + strings.ToLower(target))
-		if err != nil {
-			return err
-		}
-		defer repoLock.Release()
-	}
-
-	release, err := prepareReleasePlan(configPath, target, exists, cfg, o.NoRelease, git, gh)
-	if err != nil {
-		return err
-	}
-	if o.State != nil {
-		releaseState, stateErr := releaseStateFromPlan(release)
-		if stateErr != nil {
-			return stateErr
-		}
-		o.State.Release = releaseState
-	}
-
-	fmt.Printf("GitMake %s\n\n", Version)
-	fmt.Printf("  %s\n", cfg.Repo.Name)
-	fmt.Printf("  %s · %s\n\n", target, cfg.Repo.Visibility)
-	if exists && strings.TrimSpace(repoInfo.Visibility) != "" && !strings.EqualFold(repoInfo.Visibility, cfg.Repo.Visibility) {
-		fmt.Printf("! Visibility mismatch   config %s · remote %s (remote unchanged)\n", cfg.Repo.Visibility, strings.ToLower(repoInfo.Visibility))
-	}
-	if source.Repaired {
-		fmt.Printf("✓ Source selected       %s\n", sourceDisplay(source))
-	}
-	if configSource == "stdin" {
-		fmt.Printf("✓ Config               stdin · validated ephemeral config\n")
-	} else if configSource == "inferred" {
-		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
-	} else if configSource == "project_memory" {
-		fmt.Printf("✓ Project memory        %s\n", target)
-		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
-	}
-	fmt.Printf("· Source mode           %s\n", source.Mode)
-	fmt.Printf("· Source path           %s\n", source.Path)
-
-	if o.State != nil {
-		o.State.enter("PREPARE")
-	}
-	work, err := os.MkdirTemp("", "gitmake-*")
-	if err != nil {
-		return err
-	}
-	if o.KeepTemp {
-		fmt.Println("· Temporary workspace  " + work)
-	} else {
-		defer os.RemoveAll(work)
-	}
-	snapshot := filepath.Join(work, "snapshot")
-	files, ignored, snapshotHash, err := snapshotSelectedSource(source, cfg, snapshot)
-	if err != nil {
-		return err
-	}
-	if files == 0 {
-		return fmt.Errorf("source %s contains no publishable regular files", source.Mode)
-	}
-	if snapshotHash != sourceSHA {
-		return fmt.Errorf("source changed while preparing the snapshot; create a fresh plan")
-	}
-	if o.State != nil {
-		o.State.Files = files
-		o.State.IgnoredFiles = ignored
-		o.State.enter("SECURITY")
-	}
-	securityReport, err := enforceSecurity(snapshot, cfg, git.HasLFS())
-	if o.State != nil {
-		o.State.Security = securityStateFromReport(securityReport)
-	}
-	if err != nil {
-		return err
-	}
-	if o.State != nil {
-		o.State.enter("VALIDATE")
-	}
-	fmt.Printf("✓ Source validated      %d files\n", files)
-	if source.Mode == "folder" && ignored > 0 {
-		fmt.Printf("· Ignored entries       %d · .gitignore/.gitmakeignore/defaults\n", ignored)
-	}
-	if securityReport.SecretScan {
-		fmt.Printf("✓ Security scan         %d files · no secrets\n", securityReport.ScannedFiles)
-	}
-	if len(securityReport.LargeFiles) > 0 {
-		fmt.Printf("· Large files           %d reviewed\n", len(securityReport.LargeFiles))
-	}
+	reportValidatedSource(o, source, snap)
 
 	if exists {
 		if err := updateFlow(o, cfg, target, repoInfo.URL, repoInfo.DefaultBranch(), snapshot, work, git, gh, release); err != nil {

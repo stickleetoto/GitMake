@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
@@ -28,6 +29,10 @@ const (
 	helperStartTimeout = 10 * time.Second
 )
 
+// replacementSeq keeps every staged replacement in this process on its own
+// script and log.
+var replacementSeq uint64
+
 func prepare(source, target string, parentPID int) (scriptPath, logPath string, err error) {
 	source, err = filepath.Abs(source)
 	if err != nil {
@@ -41,14 +46,23 @@ func prepare(source, target string, parentPID int) (scriptPath, logPath string, 
 		return "", "", fmt.Errorf("staged executable is unavailable: %w", err)
 	}
 
-	token := fmt.Sprintf("%d", os.Getpid())
+	// The token has to be unique per call, not per process. Keying it on the
+	// pid alone made every replacement in one process share a script and a log,
+	// so a helper still running from an earlier call could overwrite the log the
+	// next call is waiting on, or have its script deleted out from under it.
+	// Two GitMake processes replacing at once would have collided the same way.
+	//
+	// The counter rather than a timestamp: Windows clock granularity is around
+	// 15 ms, so consecutive calls read the same nanosecond value.
+	token := fmt.Sprintf("%d-%d", os.Getpid(), atomic.AddUint64(&replacementSeq, 1))
 	if parentPID == 0 {
 		token += "-sync"
 	}
 	scriptPath = filepath.Join(os.TempDir(), "gitmake-replace-"+token+".ps1")
 	logPath = filepath.Join(os.TempDir(), "gitmake-replace-"+token+".log")
-	// A stale log from an earlier attempt would make the start handshake pass
-	// without the helper ever running.
+	// A stale log would make the start handshake pass without the helper ever
+	// running. Unique tokens make that impossible, but removing it costs
+	// nothing and keeps the handshake's precondition explicit.
 	_ = os.Remove(logPath)
 	content := buildPowerShell(scriptSpec{
 		Source: source, Target: target, ParentPID: parentPID, LogPath: logPath,

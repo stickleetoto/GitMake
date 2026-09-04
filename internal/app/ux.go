@@ -95,56 +95,6 @@ func confirmationCode(planID string) string {
 	return strings.ToUpper(raw)
 }
 
-// confirmSimplePlan adapts confirmation friction to the reviewed risk. --yes
-// is deliberately accepted only for low-risk plans; medium/high risk always
-// requires an interactive human ceremony.
-func confirmSimplePlan(p planstore.Plan, assumeYes bool) (confirmed bool, destructive bool, err error) {
-	level := strings.ToLower(strings.TrimSpace(p.Risk.Level))
-	if level == "" {
-		level = "low"
-	}
-	if p.Risk.Destructive || level == "high" {
-		if !stdinInteractive() {
-			return false, false, fmt.Errorf("high-risk plan requires interactive confirmation; review plan %s in a terminal", p.ID)
-		}
-		code := "DELETE-" + confirmationCode(p.ID)
-		fmt.Printf("\nHigh-risk change. Type %s to confirm: ", code)
-		line, e := readSimpleLine()
-		if e != nil {
-			return false, false, e
-		}
-		if strings.TrimSpace(line) != code {
-			return false, false, nil
-		}
-		return true, true, nil
-	}
-	if level == "medium" {
-		if !stdinInteractive() {
-			return false, false, fmt.Errorf("medium-risk plan requires interactive confirmation; review plan %s in a terminal", p.ID)
-		}
-		fmt.Print("\nRisk needs review. Type PUBLISH to continue: ")
-		line, e := readSimpleLine()
-		if e != nil {
-			return false, false, e
-		}
-		return strings.EqualFold(strings.TrimSpace(line), "PUBLISH"), false, nil
-	}
-	if assumeYes {
-		return true, false, nil
-	}
-	prompt := "Publish? [Y/n]: "
-	if p.Mode == "UPDATE" {
-		prompt = "Publish update? [Y/n]: "
-	}
-	fmt.Printf("\n%s", prompt)
-	line, e := readSimpleLine()
-	if e != nil {
-		return false, false, e
-	}
-	line = strings.ToLower(strings.TrimSpace(line))
-	return line == "" || line == "y" || line == "yes", false, nil
-}
-
 func printSimpleSuccess(p planstore.Plan, state *PipelineState, elapsed time.Duration) {
 	target := p.Repository
 	branch := p.Branch

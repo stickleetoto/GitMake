@@ -3,7 +3,6 @@
 package selfupdate
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -83,9 +82,13 @@ func TestStagedHelperActuallyRunsTheScript(t *testing.T) {
 	}
 }
 
-// TestStageRejectsAStaleLogAsProofOfStart makes sure the start handshake
-// cannot be satisfied by a log left behind by an earlier attempt.
-func TestStageRejectsAStaleLogAsProofOfStart(t *testing.T) {
+// TestEachReplacementGetsItsOwnFiles is the regression guard for a flake that
+// only appeared under CI timing. The script and log paths were keyed on the
+// process id alone, so every replacement in one process shared them: a helper
+// still running from an earlier call could recreate the log a later call was
+// waiting on, or lose its script to that call's cleanup. Two GitMake processes
+// replacing at the same time would have collided identically.
+func TestEachReplacementGetsItsOwnFiles(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "gitmake-new.exe")
 	target := filepath.Join(dir, "gitmake.exe")
@@ -93,23 +96,29 @@ func TestStageRejectsAStaleLogAsProofOfStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stale := filepath.Join(os.TempDir(), fmt.Sprintf("gitmake-replace-%d.log", os.Getpid()))
-	if err := os.WriteFile(stale, []byte("[old] replacement helper started\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	seenScripts := map[string]bool{}
+	seenLogs := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		scriptPath, logPath, err := prepare(source, target, 4242)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_ = os.Remove(scriptPath)
+			_ = os.Remove(logPath)
+		})
+		if seenScripts[scriptPath] {
+			t.Fatalf("two replacements share the script %s", scriptPath)
+		}
+		if seenLogs[logPath] {
+			t.Fatalf("two replacements share the log %s", logPath)
+		}
+		seenScripts[scriptPath] = true
+		seenLogs[logPath] = true
 
-	scriptPath, logPath, err := prepare(source, target, 4242)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(logPath)
-		_ = os.Remove(scriptPath)
-	})
-	if logPath != stale {
-		t.Fatalf("unexpected helper log path %q", logPath)
-	}
-	if _, err := os.Stat(logPath); err == nil {
-		t.Fatal("prepare must clear a stale helper log, or the start handshake proves nothing")
+		// The handshake waits for this file to appear, so it must not exist yet.
+		if _, err := os.Stat(logPath); err == nil {
+			t.Fatalf("prepare left a log at %s; the start handshake would prove nothing", logPath)
+		}
 	}
 }

@@ -110,17 +110,8 @@ jobs:
       - name: Run E2E suites
         run: |
           set -euo pipefail
-          # These four assert behaviour v1.0 deliberately removed: the
-          # token-based approval flow that printed a gma_... token, and
-          # publishing without interactive confirmation. They have failed since
-          # v1.0 and cannot be "fixed" -- they must be ported to the current
-          # approval model or retired. Quarantined so the rest of the suite
-          # stays a meaningful gate rather than permanently red.
-          quarantined="scripts/e2e_v03.sh scripts/e2e_v07.sh scripts/e2e_v072.sh scripts/e2e_v073.sh"
-
           failed=()
           for script in scripts/e2e*.sh; do
-            case " $quarantined " in *" $script "*) continue ;; esac
             echo "::group::$script"
             if bash "$script"; then
               echo "PASS $script"
@@ -135,15 +126,6 @@ jobs:
             echo "Failing suites: ${failed[*]}"
             exit 1
           fi
-
-      - name: Quarantined pre-v1.0 suites (reported, not blocking)
-        continue-on-error: true
-        run: |
-          for script in scripts/e2e_v03.sh scripts/e2e_v07.sh scripts/e2e_v072.sh scripts/e2e_v073.sh; do
-            echo "::group::$script"
-            bash "$script" && echo "PASS $script" || echo "STILL FAILING $script"
-            echo "::endgroup::"
-          done
 
   # Suites that run on Windows today. The rest drive interactive confirmation
   # through a pty, which has no Windows equivalent here; that gap is tracked
