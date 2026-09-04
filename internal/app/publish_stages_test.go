@@ -87,6 +87,20 @@ func publishEnv(t *testing.T) string {
 	return project
 }
 
+// samePathOnDisk compares two paths after resolving symlinks. macOS hands out
+// temporary directories under /var, which is a symlink to /private/var, so a
+// resolved path and the path a test was given are both correct and different.
+func samePathOnDisk(t *testing.T, a, b string) bool {
+	t.Helper()
+	resolve := func(p string) string {
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			return real
+		}
+		return p
+	}
+	return strings.EqualFold(resolve(a), resolve(b))
+}
+
 func publishOptions() Options {
 	o := Options{Command: "publish", ConfigPath: "gitmake.json", DryRun: true, ReadOnly: true}
 	o.State = newPipeline(o)
@@ -112,7 +126,7 @@ func TestDiscoverInfersAZeroConfigFolderPublish(t *testing.T) {
 	if in.Source.Mode != "folder" {
 		t.Fatalf("source mode = %q, want folder", in.Source.Mode)
 	}
-	if !strings.EqualFold(in.Source.Path, project) {
+	if !samePathOnDisk(t, in.Source.Path, project) {
 		t.Fatalf("source path = %q, want %q", in.Source.Path, project)
 	}
 	if in.SourceSHA256 == "" {
