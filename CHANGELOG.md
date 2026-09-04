@@ -1,3 +1,43 @@
+## v1.2.8 - The Publish Pipeline, Taken Apart
+
+v1.2.7 gave GitMake continuous integration. This release uses it. The publishing pipeline is separated into stages that can be tested individually, and the safety rules it enforces are pinned by tests for the first time. No config, plan, approval, project-identity or MCP interface changes; the E2E suites were run at every step.
+
+### Confirmation friction is now a tested contract
+
+`STABILITY.md` promises that `--yes` accepts low-risk plans only, that a medium-risk plan requires a typed `PUBLISH`, and that a destructive one requires a phrase carrying that plan's own suffix. Nothing tested it: the rules lived inside one function that printed to stdout and read a terminal in the same breath.
+
+- Separated the rules from the conversation. What GitMake demands for a given risk is now decidable without a terminal.
+- Added the full table as tests, including that `--yes` cannot answer for a person even at a terminal, and that a destructive phrase from one plan cannot confirm another.
+- Corrected one detail: a declined destructive confirmation reported `destructive=true` alongside `confirmed=false`. Callers discard the flag when confirmation fails so nothing was wrong in practice, but it travels into the approval grant and should describe a confirmation that happened.
+
+### runPublish: 295 lines to 47
+
+The publish already had five stages -- it announced `DISCOVER`, `PLAN`, `PREPARE`, `SECURITY` and `VALIDATE` as it ran -- but all five shared one scope.
+
+- `discoverPublishInput` resolves the source, the configuration and the hashes a reviewed plan binds to.
+- `planPublishTarget` decides the repository, the mode and the release, and takes the repository lock. `printPlanHeader` explains that to the user; deciding and explaining were the same code.
+- `prepareSnapshot` materialises the snapshot, proves it did not change while being copied, and runs the security gate.
+- `VALIDATE` rejected nothing by the time it ran, so it is now `reportValidatedSource`.
+- The workspace cleanup and repository lock belong to the whole publish, not the stage that creates them, so those stages return their cleanup for `runPublish` to defer. `--keep-temp` turns the cleanup into a no-op rather than skipping a deferral.
+
+`app.go`: 1,320 -> 1,070 lines.
+
+### Coverage where a bug would be worst
+
+`internal/app` holds the publishing pipeline and sat at 26%, because reaching any part of it meant reaching all of it. It is now 42%, driven against the stubbed GitHub CLI with a bare repository on disk, so what was published can be inspected rather than inferred.
+
+The planned port-injection step was dropped after measurement: once the stages were separate they were already reachable. `planPublishTarget` builds its clients from PATH, discovery needs only a working directory, and `captureOutput` already existed. An `Env` struct would have been ceremony around seams that turned out to be open.
+
+### Four E2E suites retired, none of their checks lost
+
+v1.2.7 quarantined `e2e_v03`, `v07`, `v072` and `v073` because each ended in the pre-v1.0 approval flow that printed a copyable token. Only their tail was obsolete; everything before it asserted behaviour GitMake still has, and quarantining took those checks out of service.
+
+Ported to Go, where they also run on Windows -- the originals needed a pty: managed sync leaving remote-only files alone and removing only what GitMake published, a mass deletion classified destructive and blocked before any mutation, an ordinary cleanup that is not, an update reporting a visibility mismatch without changing the remote, and the project identity committed on the first publish. The suites and the CI quarantine step are removed.
+
+### Fixed
+
+- Staged Windows replacements keyed their helper script and log on the process id alone, so every replacement in one process shared them and timing decided whether the test suite passed. The same collision applied outside tests: two GitMake processes replacing at once shared both files. Each replacement now gets its own. A timestamp was not enough -- Windows clock granularity is around 15 ms, so consecutive calls read the same nanosecond value.
+
 ## v1.2.7 — Verification, Error Contract, and Secret Coverage
 
 v1.2.6 fixed the updater. This release fixes the reasons the updater defect went unnoticed through three releases, and closes the largest gap in the safety gate GitMake exists to provide. No publishing, approval, plan, config, project-identity, or MCP interface changes.
