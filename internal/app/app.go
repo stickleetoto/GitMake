@@ -17,9 +17,7 @@ import (
 	"gitmake/internal/github"
 	"gitmake/internal/gitops"
 	"gitmake/internal/installer"
-	"gitmake/internal/oplock"
 	"gitmake/internal/projectid"
-	"gitmake/internal/runner"
 	"gitmake/internal/syncer"
 	"gitmake/internal/upgrader"
 )
@@ -716,94 +714,17 @@ func runPublish(o Options) error {
 		}
 		return err
 	}
-	configPath, cfg, source := in.ConfigPath, in.Config, in.Source
-	configSource, sourceSHA, memoryUsed := in.ConfigSource, in.SourceSHA256, in.MemoryUsed
+	cfg, source, sourceSHA := in.Config, in.Source, in.SourceSHA256
 
-	run := runner.Runner{Verbose: o.Verbose}
-	git := gitops.Client{Run: run}
-	gh := github.Client{Run: run}
-	if err := git.Preflight(); err != nil {
-		return err
-	}
-	if err := gh.Preflight(); err != nil {
-		return err
-	}
-
-	owner := cfg.Repo.Owner
-	if owner == "" {
-		owner, err = gh.CurrentUser()
-		if err != nil {
-			return err
-		}
-	}
-	target := owner + "/" + cfg.Repo.Name
-	if err := validateFolderProjectMemory(source, target); err != nil {
-		return err
-	}
-	repoInfo, exists, err := gh.Repo(owner, cfg.Repo.Name)
+	plan, releaseRepoLock, err := planPublishTarget(o, in, &cfg)
+	defer releaseRepoLock()
 	if err != nil {
 		return err
 	}
-	if memoryUsed && exists && strings.TrimSpace(repoInfo.Visibility) != "" {
-		cfg.Repo.Visibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
-	}
-	if o.State != nil {
-		o.State.Visibility = cfg.Repo.Visibility
-		o.State.Repository = target
-		if exists {
-			o.State.Mode = "UPDATE"
-			o.State.RemoteVisibility = strings.ToLower(strings.TrimSpace(repoInfo.Visibility))
-		} else {
-			o.State.Mode = "CREATE"
-		}
-	}
-	if exists && o.CreateOnly {
-		return fmt.Errorf("repository %s already exists (--create-only)", target)
-	}
-	if !exists && o.UpdateOnly {
-		return fmt.Errorf("repository %s does not exist (--update-only)", target)
-	}
+	git, gh := plan.Git, plan.GitHub
+	target, repoInfo, exists, release := plan.Target, plan.RepoInfo, plan.Exists, plan.Release
 
-	var repoLock *oplock.Lock
-	if !o.DryRun {
-		repoLock, err = oplock.Acquire("repo:" + strings.ToLower(target))
-		if err != nil {
-			return err
-		}
-		defer repoLock.Release()
-	}
-
-	release, err := prepareReleasePlan(configPath, target, exists, cfg, o.NoRelease, git, gh)
-	if err != nil {
-		return err
-	}
-	if o.State != nil {
-		releaseState, stateErr := releaseStateFromPlan(release)
-		if stateErr != nil {
-			return stateErr
-		}
-		o.State.Release = releaseState
-	}
-
-	fmt.Printf("GitMake %s\n\n", Version)
-	fmt.Printf("  %s\n", cfg.Repo.Name)
-	fmt.Printf("  %s · %s\n\n", target, cfg.Repo.Visibility)
-	if exists && strings.TrimSpace(repoInfo.Visibility) != "" && !strings.EqualFold(repoInfo.Visibility, cfg.Repo.Visibility) {
-		fmt.Printf("! Visibility mismatch   config %s · remote %s (remote unchanged)\n", cfg.Repo.Visibility, strings.ToLower(repoInfo.Visibility))
-	}
-	if source.Repaired {
-		fmt.Printf("✓ Source selected       %s\n", sourceDisplay(source))
-	}
-	if configSource == "stdin" {
-		fmt.Printf("✓ Config               stdin · validated ephemeral config\n")
-	} else if configSource == "inferred" {
-		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
-	} else if configSource == "project_memory" {
-		fmt.Printf("✓ Project memory        %s\n", target)
-		fmt.Printf("· Config               inferred in memory · %s mode\n", source.Mode)
-	}
-	fmt.Printf("· Source mode           %s\n", source.Mode)
-	fmt.Printf("· Source path           %s\n", source.Path)
+	printPlanHeader(in, cfg, plan)
 
 	snap, cleanupWorkspace, err := prepareSnapshot(o, source, cfg, sourceSHA, git.HasLFS())
 	defer cleanupWorkspace()
@@ -811,21 +732,8 @@ func runPublish(o Options) error {
 		return err
 	}
 	work, snapshot := snap.Workspace, snap.Path
-	files, ignored, securityReport := snap.Files, snap.Ignored, snap.Security
 
-	if o.State != nil {
-		o.State.enter("VALIDATE")
-	}
-	fmt.Printf("✓ Source validated      %d files\n", files)
-	if source.Mode == "folder" && ignored > 0 {
-		fmt.Printf("· Ignored entries       %d · .gitignore/.gitmakeignore/defaults\n", ignored)
-	}
-	if securityReport.SecretScan {
-		fmt.Printf("✓ Security scan         %d files · no secrets\n", securityReport.ScannedFiles)
-	}
-	if len(securityReport.LargeFiles) > 0 {
-		fmt.Printf("· Large files           %d reviewed\n", len(securityReport.LargeFiles))
-	}
+	reportValidatedSource(o, source, snap)
 
 	if exists {
 		if err := updateFlow(o, cfg, target, repoInfo.URL, repoInfo.DefaultBranch(), snapshot, work, git, gh, release); err != nil {

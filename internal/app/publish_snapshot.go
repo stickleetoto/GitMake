@@ -85,3 +85,23 @@ func prepareSnapshot(o Options, source sourceSelection, cfg config.Config, sourc
 	}
 	return snap, cleanup, nil
 }
+
+// reportValidatedSource is the VALIDATE stage. Everything it could reject has
+// already been rejected: the snapshot matched the reviewed hash and the
+// security gate passed. What remains is telling the user what was checked, so
+// the numbers they are about to approve are visible rather than implied.
+func reportValidatedSource(o Options, source sourceSelection, snap publishSnapshot) {
+	if o.State != nil {
+		o.State.enter("VALIDATE")
+	}
+	fmt.Printf("✓ Source validated      %d files\n", snap.Files)
+	if source.Mode == "folder" && snap.Ignored > 0 {
+		fmt.Printf("· Ignored entries       %d · .gitignore/.gitmakeignore/defaults\n", snap.Ignored)
+	}
+	if snap.Security.SecretScan {
+		fmt.Printf("✓ Security scan         %d files · no secrets\n", snap.Security.ScannedFiles)
+	}
+	if len(snap.Security.LargeFiles) > 0 {
+		fmt.Printf("· Large files           %d reviewed\n", len(snap.Security.LargeFiles))
+	}
+}
