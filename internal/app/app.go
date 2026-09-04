@@ -805,41 +805,14 @@ func runPublish(o Options) error {
 	fmt.Printf("· Source mode           %s\n", source.Mode)
 	fmt.Printf("· Source path           %s\n", source.Path)
 
-	if o.State != nil {
-		o.State.enter("PREPARE")
-	}
-	work, err := os.MkdirTemp("", "gitmake-*")
+	snap, cleanupWorkspace, err := prepareSnapshot(o, source, cfg, sourceSHA, git.HasLFS())
+	defer cleanupWorkspace()
 	if err != nil {
 		return err
 	}
-	if o.KeepTemp {
-		fmt.Println("· Temporary workspace  " + work)
-	} else {
-		defer os.RemoveAll(work)
-	}
-	snapshot := filepath.Join(work, "snapshot")
-	files, ignored, snapshotHash, err := snapshotSelectedSource(source, cfg, snapshot)
-	if err != nil {
-		return err
-	}
-	if files == 0 {
-		return fmt.Errorf("source %s contains no publishable regular files", source.Mode)
-	}
-	if snapshotHash != sourceSHA {
-		return fmt.Errorf("source changed while preparing the snapshot; create a fresh plan")
-	}
-	if o.State != nil {
-		o.State.Files = files
-		o.State.IgnoredFiles = ignored
-		o.State.enter("SECURITY")
-	}
-	securityReport, err := enforceSecurity(snapshot, cfg, git.HasLFS())
-	if o.State != nil {
-		o.State.Security = securityStateFromReport(securityReport)
-	}
-	if err != nil {
-		return err
-	}
+	work, snapshot := snap.Workspace, snap.Path
+	files, ignored, securityReport := snap.Files, snap.Ignored, snap.Security
+
 	if o.State != nil {
 		o.State.enter("VALIDATE")
 	}
