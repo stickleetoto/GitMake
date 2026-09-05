@@ -131,6 +131,16 @@ func printSimpleSuccess(p planstore.Plan, state *PipelineState, elapsed time.Dur
 	} else {
 		fmt.Println("Release     none")
 	}
+	// Simple Mode is deliberately short, but whether GitHub actually holds what
+	// was just approved is not a detail: it is the one fact a summary of a
+	// publish should not leave the reader to assume.
+	if state != nil && state.Verification != nil && state.Verification.Checked {
+		if state.Verification.RemoteCommit != "" {
+			fmt.Printf("Verified    remote at %.12s\n", state.Verification.RemoteCommit)
+		} else {
+			fmt.Println("Verified    yes")
+		}
+	}
 	fmt.Printf("Time        %.1fs\n", elapsed.Seconds())
 	if repoURL != "" {
 		fmt.Println("\n" + repoURL)

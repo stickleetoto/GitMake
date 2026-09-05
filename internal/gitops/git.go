@@ -222,3 +222,73 @@ func msg(res runner.Result) string {
 	}
 	return fmt.Sprintf("exit code %d", res.Code)
 }
+
+// RemoteHeadSHA reports what the remote branch actually points at.
+//
+// A push that returns success is not by itself proof that the remote moved:
+// the answer GitMake prints should come from asking the remote, not from
+// assuming the command that just ran did what it said. It is also what `undo`
+// checks before reverting, so a revert cannot land on top of somebody else's
+// later push.
+//
+// An empty string means the branch does not exist on the remote.
+func (c Client) RemoteHeadSHA(dir, branch string) (string, error) {
+	res, err := c.Run.Run(dir, "git", "ls-remote", "origin", "refs/heads/"+branch)
+	if err != nil {
+		return "", err
+	}
+	if res.Code != 0 {
+		return "", fmt.Errorf("read remote branch %s: %s", branch, msg(res))
+	}
+	line := strings.TrimSpace(res.Stdout)
+	if line == "" {
+		return "", nil
+	}
+	// "<sha>\trefs/heads/<branch>", one line per matching ref.
+	sha, _, ok := strings.Cut(strings.TrimSpace(strings.Split(line, "\n")[0]), "\t")
+	if !ok || strings.TrimSpace(sha) == "" {
+		return "", fmt.Errorf("read remote branch %s: unexpected ls-remote output %q", branch, line)
+	}
+	return strings.TrimSpace(sha), nil
+}
+
+// Revert creates a commit that undoes commit, without rewriting history.
+//
+// This is the only shape of undo GitMake performs. Resetting or force-pushing
+// would remove the published commit from the branch, which the safety contract
+// forbids, and which would not actually unpublish anything: the objects stay
+// reachable by SHA regardless.
+func (c Client) Revert(dir, commit, message string) error {
+	// --no-commit so the commit message stays GitMake's to write, and so an
+	// empty revert can be reported as such instead of failing inside git.
+	res, err := c.Run.Run(dir, "git", "revert", "--no-commit", commit)
+	if err != nil {
+		return err
+	}
+	if res.Code != 0 {
+		// --abort, not --quit: --quit forgets the in-progress revert but leaves
+		// the conflicted index and working tree behind, so the clone would stay
+		// dirty and every later operation in it would start from that mess.
+		_, _ = c.Run.Run(dir, "git", "revert", "--abort")
+		return fmt.Errorf("git revert %s: %s", commit, msg(res))
+	}
+	staged, err := c.HasStagedChanges(dir)
+	if err != nil {
+		return err
+	}
+	if !staged {
+		_, _ = c.Run.Run(dir, "git", "revert", "--abort")
+		return fmt.Errorf("commit %s is already undone; there is nothing to revert", commit)
+	}
+	return c.Commit(dir, message)
+}
+
+// CommitExists reports whether dir holds commit, so undo can say "that commit
+// is not in this branch" rather than failing inside git.
+func (c Client) CommitExists(dir, commit string) (bool, error) {
+	res, err := c.Run.Run(dir, "git", "cat-file", "-e", commit+"^{commit}")
+	if err != nil {
+		return false, err
+	}
+	return res.Code == 0, nil
+}

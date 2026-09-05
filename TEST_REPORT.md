@@ -1,4 +1,4 @@
-# GitMake v1.2.9 Test Report
+# GitMake v1.3.0 Test Report
 
 Verified on Windows 11 x64 locally, and on Linux, Windows and macOS in CI.
 
@@ -11,82 +11,87 @@ Verified on Windows 11 x64 locally, and on Linux, Windows and macOS in CI.
 | `go test ./...` | PASS |
 | `go test ./...` a second time | PASS (the suite is repeatable) |
 | `go test -race ./...` | PASS on Linux and macOS in CI |
-| Windows E2E: v05, v051, v052, v121, v123, v124, v126 | PASS locally and in CI |
+| Windows E2E: v05, v051, v052, v121, v123, v124, v126, v130 | PASS locally and in CI |
 | Linux E2E: all remaining suites | PASS |
 | `package` job: build, verify manifest, rebuild from the source ZIP | PASS |
 
-CI on the release commit: 8 of 8 green.
-
 ## Coverage
 
-| Package | v1.2.8 | v1.2.9 |
+| Package | v1.2.9 | v1.3.0 |
 | --- | --- | --- |
-| `internal/securityscan` | 83.1% | 87.3% |
-| `internal/app` | 41.9% | 41.9% |
+| `internal/history` | 0% | 79.2% |
+| `internal/gitops` | 28.1% | 49.7% |
+| `internal/app` | 41.9% | 49.3% |
+| `internal/securityscan` | 87.3% | 87.3% |
 | `internal/planstore` | 82.6% | 82.6% |
-| `internal/discovery` | 81.8% | 81.8% |
-| `internal/github` | 69.3% | 69.3% |
 | `internal/gmerr` | 100% | 100% |
+
+`internal/history` had no tests at all. It was decoration until this release
+made it the thing `gitmake undo` reads to decide what to revert.
 
 ## What is proven that was not before
 
-The secret scan was made roughly a hundred times faster. Everything below
-exists so that speed cannot have cost detection, which is the failure this
-change could plausibly have introduced and which no existing test would have
-caught: a literal gate that is too narrow stops finding a credential without
-failing, and a parallel scan can make findings depend on which worker finished
-first.
+### Undo reverts without removing
 
-- Every content rule returns the identical offset gated and ungated, over
-  samples covering every branch of every alternation: all five GitHub token
-  prefixes, both AWS prefixes, all five Slack ones, both Stripe ones, every
-  `-----BEGIN` variant, Discord's canary and ptb hosts, and OpenAI's three
-  account prefixes.
-- Those samples are proven to be real positives first, so the agreement above
-  cannot be satisfied by inputs that match nothing.
-- Every rule declares a literal gate, and every rule has a sample. A rule added
-  later without either is a test failure, not a silent regression.
-- A rule that declares no literals runs its regex unchanged, so the fallback
-  costs speed rather than detection.
-- The parallel scan equals the sequential scan of the same tree at 2, 3, 4, 8
-  and 16 workers, twenty runs each, over nineteen kinds of secret in sixty
-  files — two kinds in one file, secrets three thousand lines deep, binary
-  files, a secret-by-name `.env`, and a large file. Reports must be deeply
-  equal, order included.
-- The same tree scanned repeatedly at the default worker count gives the
-  identical report every time.
-- An unreadable file produces the same error on every run, so the gate cannot
-  sometimes pass and sometimes fail.
+Driven end to end against the stubbed GitHub CLI with a bare repository on
+disk, so the remote is inspected rather than inferred:
 
-The equivalence test was verified to fail rather than assumed to work.
-Collecting results in completion order — the classic form of this bug — makes
-the scanner attribute secrets to the wrong files, and the test catches it on
-the first run.
+- a revert takes the remote from two commits to three; it never removes one
+- the reverted commit stays reachable afterwards, because undo is not deletion
+- content returns to the previous publish, and a file that publish added is gone
+- the same operation against real Git, in `internal/gitops`: the tree after a
+  revert equals the tree before the publish
 
-The whole scanner was also compared against v1.2.8 end to end. A 125-file
-fixture covering all nineteen rules, binary files, `.env`, a documentation
-placeholder that must not block, a large file, an empty file and an empty
-directory produced 97 findings on both versions and byte-identical report JSON.
+### Undo refuses rather than guesses
 
-## Benchmarks
+- a branch that moved on since the publish is refused, with `REMOTE_MOVED`, and
+  the remote is unchanged afterwards
+- a publish that created the repository is refused, saying there is no earlier
+  state and that repository deletion is the user's to do
+- a second undo of the same publish is refused with `NOTHING_TO_UNDO`
+- `--dry-run` changes nothing and does not consume the entry
+- the selection rules are also tested directly against ten history shapes,
+  because the end-to-end tests cannot easily produce every one
 
-Committed as `BenchmarkScanTree` and `BenchmarkScanContentOneFile`, so a later
-change to the rule table cannot quietly make the publish floor worse. Trees are
-warmed before timing: on Windows the first read of a freshly written file also
-pays for the virus scanner, which would otherwise swamp the measurement.
+### Undo is not a way around the confirmation table
 
-| tree | v1.2.8 | v1.2.9 |
+`--yes` cannot accept an undo whose revert would delete most of a repository.
+The risk is computed against the managed-file baseline the previous run
+recorded; the prompter is injected so the result does not depend on whatever
+stdin the test runner was handed.
+
+### Undo tells the truth about what it did not do
+
+The output must say that the reverted contents remain published and that a
+published credential has to be rotated. Asserted in the Go tests and again in
+`e2e_v130` against the real binary.
+
+### Publishes are confirmed against GitHub
+
+- a publish records a full commit SHA, and the remote really points at it
+- a release is checked for existence and for every asset at the size uploaded
+- a missing asset and a truncated one are both reported
+- an unreported size is not treated as a mismatch
+- a dry run produces no verification, because it has nothing to confirm
+
+## Guards verified to fail
+
+Every new guard was run against the defect it describes rather than assumed to
+work:
+
+| Guard | Sabotage | Result |
 | --- | --- | --- |
-| 100 files × 4 KiB | 118.7 ms | 3.4 ms |
-| 500 files × 16 KiB | 3,958 ms | 14.2 ms |
-| 2000 files × 16 KiB | 17,271 ms | 175 ms |
-
-Allocation on the last: 2.17 GB to 11.5 MB.
+| Simple Mode publishes are undoable | remove the state copy-back | FAIL: "left no repository" |
+| Undo respects the destructive ceremony | drop the managed baseline | FAIL: "--yes accepted an undo that deletes most of the repository" |
+| History entries do not collide | replace the counter with a constant | FAIL: 25 writes stored 14 |
+| Publishes are verified | return early from the VERIFY stage | FAIL: "no verification at all" |
 
 ## Not verified here
 
 - The race detector on the development machine, which has no C compiler. The
-  CI race jobs on Linux and macOS cover it, and both pass.
-- Linux and macOS self-upgrade against a real GitHub release. The replacement
-  is platform-neutral Go and is unit-tested, and the platform asset mapping is
-  tested against the published release names, but no such machine was used.
+  CI race jobs on Linux and macOS cover it.
+- `gitmake undo` against a real GitHub repository. It is driven end to end
+  against the stubbed CLI and real Git, and the operations it performs
+  (`ls-remote`, `revert`, `push`) are exercised against real repositories in
+  `internal/gitops`, but no live repository was reverted.
+- Linux and macOS self-upgrade against a real GitHub release.

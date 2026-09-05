@@ -1,4 +1,4 @@
-# GitMake v1.2.9
+# GitMake v1.3.0
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -25,6 +25,8 @@ v1.2.6 fixes self-upgrade for real. The deferred replacement helper introduced i
 v1.2.7 fixes the reasons that defect went unnoticed for three releases: GitMake now has continuous integration across Linux, Windows, and macOS; machine error codes are carried on the error rather than recovered from message text; the two safety-critical packages that had no tests are covered; and the secret scanner recognises the credentials AI-authored projects actually leak. `doctor`, `install`, and `upgrade` gained `--json`, and `gitmake upgrade --check` reports an available update without installing it.
 
 v1.2.9 makes the security gate roughly a hundred times faster on a typical source tree, without changing a single verdict: a tree of two thousand files went from 17.3 seconds to 175 ms. The scan is held to producing byte-identical reports to v1.2.8. v1.2.8 took the publish pipeline apart -- its five stages, discover, plan, snapshot, report and apply, are separate and individually tested, and the confirmation rules GitMake promises are pinned by tests: `--yes` accepts low-risk plans only, a medium-risk plan requires a typed `PUBLISH`, and a destructive one requires a plan-bound phrase. Publishing behaviour is unchanged.
+
+v1.3.0 adds a way back and a way to be sure. `gitmake undo` reverts the last publish by adding a commit -- never by removing one -- and refuses when the branch has moved on or when the publish created the repository. Every publish now ends by asking GitHub what it actually holds instead of trusting the commands that just ran: the remote branch must point at the commit that was pushed, and a new release must carry every asset at the size it was uploaded with.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -66,13 +68,25 @@ For normal human use:
 ```text
 gitmake                         review + publish the current project
 gitmake Project.zip             review + publish a specific ZIP
+gitmake undo                    revert the last publish
 gitmake upgrade                 update GitMake
 ```
+
+### Undoing a publish
+
+```text
+gitmake undo --dry-run          show what would be reverted, change nothing
+gitmake undo                    revert it
+```
+
+Undo adds a commit that restores the previous content. It does not reset, force-push, or delete, and it stops rather than guessing in three cases: the branch has moved on since the publish, the publish created the repository, or that publish was already undone. Releases and tags are left alone.
+
+It also does not unpublish. The reverted contents stay reachable by SHA, through the GitHub API, and in any fork or CI log that already read them, so GitMake says so every time. **If a credential was published, undoing does not remove it -- rotate it.**
 
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.9
+GitMake 1.3.0
 
 testuser/GambleLM
 Update · public

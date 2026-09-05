@@ -42,6 +42,9 @@ const (
 	PlanStale               Code = "PLAN_STALE"
 	UpgradeIntegrityFailed  Code = "UPGRADE_INTEGRITY_FAILED"
 	ConfigInvalid           Code = "CONFIG_INVALID"
+	// NothingToUndo is additive in v1.3. It reports that `gitmake undo` found
+	// no publish it can return, which is an answer rather than a malfunction.
+	NothingToUndo Code = "NOTHING_TO_UNDO"
 )
 
 // guidance is the single source of truth for how each code is reported. It
@@ -72,6 +75,7 @@ var guidanceByCode = map[Code]guidance{
 	PlanNotFound:            {true, "Create a new plan with `gitmake plan`."},
 	PlanStale:               {true, "Create a fresh plan and review it before applying."},
 	UpgradeIntegrityFailed:  {true, "Do not install the downloaded build; retry later or verify the GitHub Release assets manually."},
+	NothingToUndo:           {true, "Run `gitmake history` to see what GitMake has published from this machine. A publish that created a repository, changed nothing, or was already undone cannot be undone."},
 	ConfigInvalid:           {true, "Fix gitmake.json or run `gitmake init` to recreate it."},
 }
 

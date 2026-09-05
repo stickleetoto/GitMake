@@ -256,7 +256,14 @@ func recordHistory(o Options, runErr error) {
 	if o.State == nil {
 		return
 	}
-	e := history.Entry{Command: o.Command, OK: runErr == nil, Repository: o.State.Repository, Mode: o.State.Mode, Source: o.State.Source, PlanID: o.State.PlanID, DryRun: o.State.DryRun, ReadOnly: o.State.ReadOnly}
+	e := history.Entry{
+		Command: o.Command, OK: runErr == nil, Repository: o.State.Repository,
+		Mode: o.State.Mode, Source: o.State.Source, PlanID: o.State.PlanID,
+		DryRun: o.State.DryRun, ReadOnly: o.State.ReadOnly,
+		// Branch, Commit and RepoCreated are what makes an entry undoable. A
+		// dry run moves nothing, so it records no commit and cannot be undone.
+		Branch: o.State.Branch, Commit: o.State.Commit, RepoCreated: o.State.RepoCreated,
+	}
 	if o.State.Changes != nil {
 		e.Added = o.State.Changes.Added
 		e.Modified = o.State.Changes.Modified

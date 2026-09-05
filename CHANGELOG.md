@@ -1,3 +1,66 @@
+## v1.3.0 - A Way Back, and a Way to Be Sure
+
+GitMake could publish but never return, and it reported success on the strength of the commands it had just run rather than on what GitHub actually held. This release fixes both, and they turn out to be the same fix: a publish now records the commit it created, which is what makes verification possible and what gives an undo something to revert.
+
+### `gitmake undo`
+
+Reverts the most recent GitMake publish by **adding** a commit. Not a reset, not a force push, not a deletion -- the safety contract forbids all three, and none of them would achieve more.
+
+```text
+gitmake undo --dry-run    show what would be reverted, change nothing
+gitmake undo              revert it
+```
+
+It stops rather than guessing in three cases:
+
+- **The branch has moved on.** The published commit must still be the tip. Reverting under somebody else's later push would undo a state that no longer exists, and deciding what they meant is not GitMake's call.
+- **The publish created the repository.** There is no earlier state to return to. GitMake does not delete repositories, so removing it is the user's to do on GitHub.
+- **That publish was already undone.**
+
+Undo is confirmed with the same ceremony a publish of the same risk would need, computed against the managed-file baseline the previous run recorded, so `--yes` cannot accept a destructive one. Releases and tags are left in place: GitMake still has no code that deletes anything on GitHub, and this release does not add any.
+
+### Undo does not unpublish, and says so
+
+This is the part that decides whether the command is worth having.
+
+Reverting adds a commit. It does not remove anything: the previous contents stay reachable by SHA, through the GitHub API, and in every fork, clone and CI log that already read them. A user who believes an undo removed a leaked credential is worse off than one who never ran it, so GitMake prints this on every undo rather than only when it thinks it saw a secret:
+
+```text
+! What was published stays published.
+  The reverted contents remain reachable in Git history and through the
+  GitHub API, and in any fork, clone or CI log that already has them.
+  If a credential was published, undoing does not unpublish it: rotate it.
+```
+
+### Every publish is now confirmed against GitHub
+
+A publish used to end by reporting what it had asked GitHub to do. Nothing asked GitHub what it did.
+
+That is the exact shape of failure this project keeps finding. The staged upgrade helper reported success for three releases while doing nothing at all, because a zero exit code was taken as proof of work. So the last thing a publish does now is ask:
+
+- the remote branch must point at the commit that was pushed;
+- a release this run created must exist, with every asset present at the size it was uploaded with.
+
+```text
+✓ Verified              remote at 4a91c7f0b2de · 7 assets
+```
+
+A check that runs and disagrees is a failure and the command exits non-zero. A check that cannot run -- a network error while reading back a push that already succeeded -- is reported as "not verified" and does not fail the publish. Those are different events and GitMake reports them differently.
+
+### Three defects found while building this
+
+Each was found by the new tests rather than in use.
+
+- **Simple Mode publishes recorded useless history.** The path a person actually takes ran the apply on its own pipeline state and never copied it back, so every history entry written from it had no repository, no branch and no commit. Nothing noticed while history was only ever read by a human; `gitmake undo` could not find the publish it was meant to return. Simple Mode has been recording empty entries since history was introduced.
+- **Undo could never be classified destructive.** Risk here is a ratio, and the first version passed no managed-file baseline, leaving the denominator at zero and the destructive rule unreachable. An undo removing every file in a repository would have been offered as an ordinary `[Y/n]` question that `--yes` could answer.
+- **History entries overwrote each other.** File names were derived from `time.Now()`, and Windows clock granularity is around 15 ms, so entries written back to back shared a name. Twenty-five consecutive writes stored fourteen. This is the same defect, for the same reason, as the one fixed in the upgrade helper in v1.2.8; it is now fixed the same way, with a counter.
+
+### Also
+
+- New machine error code `NOTHING_TO_UNDO`, additive. `gitmake undo` reports `REMOTE_MOVED` when the branch, the commit or the branch tip has changed underneath it.
+- Simple Mode's summary now carries a `Verified` line. Whether GitHub holds what was just approved is not a detail to leave the reader to assume.
+- `internal/history` had no tests at all and is now at 79%. `internal/gitops` went from 28% to 50%, `internal/app` from 42% to 49%.
+
 ## v1.2.9 - The Secret Scan, Measured
 
 v1.2.8 took the publish pipeline apart. This release profiles what it spends its time on and finds that one stage was responsible for nearly all of it. Publishing behaviour is unchanged: the same trees produce byte-identical security reports, verified against v1.2.8 directly.
