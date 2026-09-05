@@ -161,6 +161,7 @@ jobs:
             scripts/e2e_v123.sh
             scripts/e2e_v124.sh
             scripts/e2e_v126.sh
+            scripts/e2e_v130.sh
           )
           failed=()
           for script in "${suites[@]}"; do

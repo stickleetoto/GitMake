@@ -403,3 +403,18 @@ func makeWritable(root string) {
 		return nil
 	})
 }
+
+// ManagedBaseline reports how many files a previous GitMake run recorded as
+// managed in repo, and whether a manifest was found at all.
+//
+// It is what gives an undo a denominator. Risk here is a ratio -- deleting ten
+// files out of twelve is a different event from deleting ten out of a thousand
+// -- and without the baseline every undo would be classified low risk no
+// matter how much it removed.
+func ManagedBaseline(repo string) (int, bool, error) {
+	m, ok, err := loadManifest(repo)
+	if err != nil || !ok {
+		return 0, ok, err
+	}
+	return len(m.Managed), true, nil
+}

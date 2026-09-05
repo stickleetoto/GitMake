@@ -22,7 +22,7 @@ import (
 	"gitmake/internal/upgrader"
 )
 
-const Version = "1.2.9"
+const Version = "1.3.0"
 
 type Options struct {
 	Command       string
@@ -172,7 +172,7 @@ func parseArgs(args []string) (Options, error) {
 			args = args[2:]
 		} else {
 			switch args[0] {
-			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "approve", "inspect", "history", "mcp":
+			case "init", "doctor", "install", "upgrade", "help", "discover", "plan", "apply", "approve", "inspect", "history", "mcp", "undo":
 				o.Command = args[0]
 				args = args[1:]
 			}
@@ -276,7 +276,7 @@ func parseArgs(args []string) (Options, error) {
 		if (o.ConfigAction == "write" || o.ConfigAction == "patch") && !o.Stdin {
 			return Options{}, fmt.Errorf("gitmake config %s requires --stdin", o.ConfigAction)
 		}
-	case "doctor", "install", "upgrade", "help", "discover", "inspect", "history", "mcp", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
+	case "doctor", "install", "upgrade", "help", "discover", "inspect", "history", "mcp", "undo", "ai-describe", "ai-install", "ai-setup", "ai-status", "ai-remove":
 		if len(rest) != 0 {
 			return Options{}, fmt.Errorf("gitmake %s does not accept positional arguments", o.Command)
 		}
@@ -319,7 +319,7 @@ func normalizeFlagOrder(args []string) []string {
 func Run(o Options) error {
 	if o.ReadOnly {
 		switch o.Command {
-		case "install", "upgrade", "init", "ai-install", "ai-setup", "ai-remove", "apply", "approve":
+		case "install", "upgrade", "init", "ai-install", "ai-setup", "ai-remove", "apply", "approve", "undo":
 			return fmt.Errorf("read-only mode blocks `gitmake %s`", strings.ReplaceAll(o.Command, "ai-", "ai "))
 		case "config":
 			if o.ConfigAction == "write" || o.ConfigAction == "patch" {
@@ -349,6 +349,8 @@ func Run(o Options) error {
 		return runInspect(o)
 	case "history":
 		return runHistory(o)
+	case "undo":
+		return runUndo(o)
 	case "mcp":
 		return runMCP(o)
 	case "config":
@@ -416,6 +418,7 @@ Project/config commands:
   gitmake approve [plan_id]   Approve the latest reviewed plan locally (no token copy)
   gitmake inspect             Inspect project/config/security state without mutation
   gitmake history             Show recent GitMake publish/apply operations
+  gitmake undo                Revert the last publish with a new commit
   gitmake config schema       Print the machine-readable config schema
   gitmake config validate     Validate gitmake.json
   gitmake config write --stdin  Validate and write config JSON from stdin
@@ -820,6 +823,14 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 	if err != nil {
 		return err
 	}
+	if o.State != nil {
+		o.State.RepoCreated = true
+		// Read the commit back rather than assuming it; verification compares
+		// the remote against this value.
+		if sha, shaErr := git.HeadSHA(snapshot); shaErr == nil {
+			o.State.Commit = sha
+		}
+	}
 	fmt.Printf("✓ Repository created    +%d ~%d -%d\n", added, modified, deleted)
 	fmt.Printf("✓ Pushed                %s\n", cfg.Git.Branch)
 	if url != "" {
@@ -840,9 +851,18 @@ func createFlow(o Options, cfg config.Config, target, snapshot string, git gitop
 				o.State.Release.Created = true
 			}
 		}
+	}
+	if err != nil {
+		return err
+	}
+	// Confirm with GitHub before reporting success.
+	if err := verifyPublish(o, snapshot, cfg.Git.Branch, target, release, git, gh); err != nil {
+		return err
+	}
+	if o.State != nil {
 		o.State.enter("REPORT")
 	}
-	return err
+	return nil
 }
 
 func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch, snapshot, work string, git gitops.Client, gh github.Client, release releasePlan) error {
@@ -1002,6 +1022,11 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 	if err := git.Push(repoDir, branch); err != nil {
 		return err
 	}
+	if o.State != nil {
+		if sha, shaErr := git.HeadSHA(repoDir); shaErr == nil {
+			o.State.Commit = sha
+		}
+	}
 	fmt.Printf("✓ Repository updated    +%d ~%d -%d\n", added, modified, deleted)
 	fmt.Printf("✓ Pushed                %s\n", branch)
 	if repoURL != "" {
@@ -1022,9 +1047,17 @@ func updateFlow(o Options, cfg config.Config, target, repoURL, repoDefaultBranch
 				o.State.Release.Created = true
 			}
 		}
+	}
+	if err != nil {
+		return err
+	}
+	if err := verifyPublish(o, repoDir, branch, target, release, git, gh); err != nil {
+		return err
+	}
+	if o.State != nil {
 		o.State.enter("REPORT")
 	}
-	return err
+	return nil
 }
 
 func diffCounts(diff string) (added, modified, deleted int) {

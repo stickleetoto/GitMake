@@ -10,32 +10,40 @@ import (
 )
 
 type PipelineState struct {
-	Stage            string          `json:"stage,omitempty"`
-	CompletedStages  []string        `json:"completed_stages,omitempty"`
-	Mode             string          `json:"mode,omitempty"`
-	Repository       string          `json:"repository,omitempty"`
-	Visibility       string          `json:"visibility,omitempty"`
-	RemoteVisibility string          `json:"remote_visibility,omitempty"`
-	Branch           string          `json:"branch,omitempty"`
-	Source           string          `json:"source,omitempty"`
-	SourceMode       string          `json:"source_mode,omitempty"`
-	SourcePath       string          `json:"source_path,omitempty"`
-	SourceSHA256     string          `json:"source_sha256,omitempty"`
-	IgnoredFiles     int             `json:"ignored_files,omitempty"`
-	BaseCommit       string          `json:"base_commit,omitempty"`
-	PlanID           string          `json:"plan_id,omitempty"`
-	Files            int             `json:"files,omitempty"`
-	Changes          *ChangeCounts   `json:"changes,omitempty"`
-	RepositoryURL    string          `json:"repository_url,omitempty"`
-	Release          *ReleaseState   `json:"release,omitempty"`
-	DryRun           bool            `json:"dry_run,omitempty"`
-	ReadOnly         bool            `json:"read_only,omitempty"`
-	Config           *ConfigState    `json:"config,omitempty"`
-	Discovery        *DiscoveryState `json:"discovery,omitempty"`
-	Security         *SecurityState  `json:"security,omitempty"`
-	Sync             *SyncState      `json:"sync,omitempty"`
-	Identity         *IdentityState  `json:"identity,omitempty"`
-	Risk             *RiskState      `json:"risk,omitempty"`
+	Stage            string   `json:"stage,omitempty"`
+	CompletedStages  []string `json:"completed_stages,omitempty"`
+	Mode             string   `json:"mode,omitempty"`
+	Repository       string   `json:"repository,omitempty"`
+	Visibility       string   `json:"visibility,omitempty"`
+	RemoteVisibility string   `json:"remote_visibility,omitempty"`
+	Branch           string   `json:"branch,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	SourceMode       string   `json:"source_mode,omitempty"`
+	SourcePath       string   `json:"source_path,omitempty"`
+	SourceSHA256     string   `json:"source_sha256,omitempty"`
+	IgnoredFiles     int      `json:"ignored_files,omitempty"`
+	BaseCommit       string   `json:"base_commit,omitempty"`
+	// Commit is what this publish actually created, read back from the
+	// repository rather than assumed. Verification compares the remote against
+	// it, and `gitmake undo` reverts it.
+	Commit string `json:"commit,omitempty"`
+	// RepoCreated marks a publish that brought the repository into existence.
+	// Such a publish has no earlier state to return to, so it cannot be undone.
+	RepoCreated   bool               `json:"repo_created,omitempty"`
+	Verification  *VerificationState `json:"verification,omitempty"`
+	PlanID        string             `json:"plan_id,omitempty"`
+	Files         int                `json:"files,omitempty"`
+	Changes       *ChangeCounts      `json:"changes,omitempty"`
+	RepositoryURL string             `json:"repository_url,omitempty"`
+	Release       *ReleaseState      `json:"release,omitempty"`
+	DryRun        bool               `json:"dry_run,omitempty"`
+	ReadOnly      bool               `json:"read_only,omitempty"`
+	Config        *ConfigState       `json:"config,omitempty"`
+	Discovery     *DiscoveryState    `json:"discovery,omitempty"`
+	Security      *SecurityState     `json:"security,omitempty"`
+	Sync          *SyncState         `json:"sync,omitempty"`
+	Identity      *IdentityState     `json:"identity,omitempty"`
+	Risk          *RiskState         `json:"risk,omitempty"`
 }
 
 type SecurityState struct {
@@ -135,6 +143,24 @@ type ReleaseState struct {
 	Resumed      bool         `json:"resumed,omitempty"`
 	Skipped      bool         `json:"skipped,omitempty"`
 	URL          string       `json:"url,omitempty"`
+}
+
+// VerificationState is what GitMake confirmed after the mutation, by asking
+// GitHub rather than by trusting the commands that just ran.
+type VerificationState struct {
+	Checked bool `json:"checked"`
+	// RemoteCommit is where the branch actually points now.
+	RemoteCommit string `json:"remote_commit,omitempty"`
+	// CommitMatches reports whether that equals the commit this run pushed.
+	CommitMatches bool `json:"commit_matches"`
+	// ReleaseAssets is how many assets the release actually holds.
+	ReleaseAssets int `json:"release_assets,omitempty"`
+	// AssetsMatch reports whether every planned asset is present with the
+	// size it was uploaded with.
+	AssetsMatch bool `json:"assets_match,omitempty"`
+	// Problems names anything that did not line up. A non-empty list is a
+	// failure: it means the publish reported success but GitHub disagrees.
+	Problems []string `json:"problems,omitempty"`
 }
 
 type MachineResult struct {

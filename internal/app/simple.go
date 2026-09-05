@@ -126,6 +126,14 @@ func runSimplePublish(o Options) error {
 	apply.State = newPipeline(apply)
 	started := time.Now()
 	detail, applyErr := captureOutput(func() error { return runApply(apply) })
+	// The apply ran on its own state, but the history entry is written from the
+	// caller's. Without copying it back, a Simple Mode publish recorded an
+	// entry with no repository and no commit -- which was invisible while
+	// history was only ever read by a person, and stops `gitmake undo` from
+	// finding the publish it is supposed to return.
+	if o.State != nil && apply.State != nil {
+		*o.State = *apply.State
+	}
 	if applyErr != nil {
 		if o.Verbose && strings.TrimSpace(detail) != "" {
 			fmt.Println("\nDetails:\n" + strings.TrimSpace(detail))

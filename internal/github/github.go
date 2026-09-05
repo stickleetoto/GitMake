@@ -184,6 +184,10 @@ func message(res runner.Result) string {
 
 type ReleaseAsset struct {
 	Name string `json:"name"`
+	// Size is what GitHub says it stored. Verification compares it against
+	// the local file, so a truncated or failed upload is visible instead of
+	// being reported as a successful release.
+	Size int64 `json:"size"`
 }
 
 type ReleaseInfo struct {

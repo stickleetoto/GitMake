@@ -390,7 +390,7 @@ func releaseView(args []string) int {
 		return 0
 	}
 
-	assets := []map[string]string{}
+	assets := []map[string]any{}
 	entries, _ := os.ReadDir(filepath.Join(dir, "assets"))
 	names := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -400,7 +400,11 @@ func releaseView(args []string) int {
 	}
 	sort.Strings(names)
 	for _, n := range names {
-		assets = append(assets, map[string]string{"name": n})
+		size := int64(0)
+		if st, err := os.Stat(filepath.Join(dir, "assets", n)); err == nil {
+			size = st.Size()
+		}
+		assets = append(assets, map[string]any{"name": n, "size": size})
 	}
 
 	return emit(map[string]any{
