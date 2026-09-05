@@ -1,3 +1,51 @@
+## v1.2.9 - The Secret Scan, Measured
+
+v1.2.8 took the publish pipeline apart. This release profiles what it spends its time on and finds that one stage was responsible for nearly all of it. Publishing behaviour is unchanged: the same trees produce byte-identical security reports, verified against v1.2.8 directly.
+
+### The security gate ran at 2 MB/s
+
+The secret scan reads every byte of everything being published, so its throughput is the floor on how fast a publish can be. It was measured at roughly 2 MB/s. A tree of two thousand ordinary source files -- thirty megabytes -- took **17.3 seconds** and allocated **2.17 GB**.
+
+Two causes, both invisible without measuring per rule:
+
+- **A leading `\b` disabled Go's literal-prefix fast path.** Fourteen of the nineteen content rules begin with `\b`. A zero-width assertion stops `regexp` from extracting a required prefix, so it runs the full engine over every byte -- about 70 MB/s per rule, and nineteen rules make roughly 4 MB/s. The five rules that begin with a plain literal (`-----BEGIN`, `https://hooks`, and so on) were already running at thousands of MB/s. The difference between the two groups was 800x, and it was entirely an artefact of how the patterns were written.
+- **A one-megabyte buffer was allocated per file**, regardless of the file's size, so scanning a two-hundred-byte file cost a megabyte of allocation and a megabyte of first-touch page faults.
+
+### What changed
+
+Each rule now declares the literals that every match of it must contain, and a `bytes.Contains` -- memchr-accelerated, GB/s -- decides whether the regex is worth running at all. The regex still returns every verdict; the literal only gates it. Ordinary source contains none of these strings, so the common case now rejects each rule outright.
+
+The scan window is allocated once per worker instead of once per file.
+
+Content scanning runs across up to eight workers. The directory walk stays sequential: it is cheap, and keeping it in one goroutine is what keeps its errors ordered. Work is handed out one file at a time rather than in equal ranges, because file sizes in a source tree differ by orders of magnitude and a fixed range would leave one worker running long after the others finished.
+
+Measured on the same trees, warmed so neither side pays for a cold cache:
+
+| tree | v1.2.8 | v1.2.9 |
+| --- | --- | --- |
+| 100 files x 4 KiB | 118.7 ms | **3.4 ms** |
+| 500 files x 16 KiB | 3,958 ms | **14.2 ms** |
+| 2000 files x 16 KiB | 17,271 ms | **175 ms** |
+
+Allocation for the last of those: 2.17 GB to 11.5 MB.
+
+Eight workers is where the measured return stopped being worth the memory, and the number came from the curve rather than from a guess. The two shapes of tree have different bottlenecks: two thousand small files are bound by per-file open and read and stop improving after two workers, while thirty-two one-megabyte files are bound by rule matching and scale nearly linearly (268 MB/s to 1631 MB/s at eight). Sixteen workers reach 2154 MB/s on the second shape, change nothing on the first, and double the memory.
+
+### Making a faster security gate a safe one
+
+Optimising the security gate is the most dangerous place in GitMake to optimise anything. A literal that is too narrow does not fail loudly; it stops detecting a credential, and every existing test stays green while the scanner goes blind. Parallelism fails the same way: a gate whose findings depend on which worker finished first is worse than a slow one.
+
+So the speed work is held down by tests that would catch exactly those failures:
+
+- Every rule is run gated and ungated over samples covering **every branch of every alternation** -- all five GitHub token prefixes, both AWS prefixes, all five Slack ones, both Stripe ones, every `-----BEGIN` variant, Discord's canary and ptb hosts, OpenAI's three account prefixes -- and the two must return the identical offset. Samples are proven to be real positives first, so the agreement cannot hold trivially.
+- A rule that declares no literals runs its regex unchanged. The fallback is deliberately the slow-but-correct direction: a rule added later can cost speed, but it cannot be silently skipped.
+- The parallel scan is compared against the sequential scan of the same tree at two, three, four, eight and sixteen workers, twenty runs each, on a fixture with nineteen kinds of secret spread across sixty files -- several with two kinds in one file, some three thousand lines deep, plus binary files, a secret-by-name `.env`, and a large file. The reports must be deeply equal, order included.
+- Findings are assembled positionally rather than in completion order, so a worker's timing cannot reach the report. Sorting is stable, so equal keys keep a fixed order instead of depending on the sort's internal choices.
+
+The equivalence test was verified to fail: collecting results in completion order -- the classic version of this bug -- makes it report secrets against **the wrong files**, and the test catches that on the first run.
+
+Finally, the whole scanner was compared against v1.2.8 end to end. A 125-file fixture covering all nineteen rules, binary files, `.env`, a documentation placeholder that must not block, a large file, an empty file and an empty directory produced 97 findings across both versions and **byte-identical** report JSON.
+
 ## v1.2.8 - The Publish Pipeline, Taken Apart
 
 v1.2.7 gave GitMake continuous integration. This release uses it. The publishing pipeline is separated into stages that can be tested individually, and the safety rules it enforces are pinned by tests for the first time. No config, plan, approval, project-identity or MCP interface changes; the E2E suites were run at every step.

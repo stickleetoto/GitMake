@@ -1,4 +1,4 @@
-# GitMake v1.2.8
+# GitMake v1.2.9
 
 GitMake turns a project **folder or ZIP snapshot** into a GitHub repository and optional GitHub Release with one command. It deliberately owns a **small publishing workflow**, not all of GitHub.
 
@@ -24,7 +24,7 @@ v1.2.6 fixes self-upgrade for real. The deferred replacement helper introduced i
 
 v1.2.7 fixes the reasons that defect went unnoticed for three releases: GitMake now has continuous integration across Linux, Windows, and macOS; machine error codes are carried on the error rather than recovered from message text; the two safety-critical packages that had no tests are covered; and the secret scanner recognises the credentials AI-authored projects actually leak. `doctor`, `install`, and `upgrade` gained `--json`, and `gitmake upgrade --check` reports an available update without installing it.
 
-v1.2.8 takes the publish pipeline apart. Its five stages -- discover, plan, snapshot, report, apply -- are separate and individually tested, and the confirmation rules GitMake promises are pinned by tests: `--yes` accepts low-risk plans only, a medium-risk plan requires a typed `PUBLISH`, and a destructive one requires a plan-bound phrase. Publishing behaviour is unchanged.
+v1.2.9 makes the security gate roughly a hundred times faster on a typical source tree, without changing a single verdict: a tree of two thousand files went from 17.3 seconds to 175 ms. The scan is held to producing byte-identical reports to v1.2.8. v1.2.8 took the publish pipeline apart -- its five stages, discover, plan, snapshot, report and apply, are separate and individually tested, and the confirmation rules GitMake promises are pinned by tests: `--yes` accepts low-risk plans only, a medium-risk plan requires a typed `PUBLISH`, and a destructive one requires a plan-bound phrase. Publishing behaviour is unchanged.
 
 For the v1 compatibility promise, see [`STABILITY.md`](STABILITY.md).
 
@@ -72,7 +72,7 @@ gitmake upgrade                 update GitMake
 Interactive Simple Mode shows the target, source mode, change counts, risk, and release before asking once:
 
 ```text
-GitMake 1.2.8
+GitMake 1.2.9
 
 testuser/GambleLM
 Update · public
