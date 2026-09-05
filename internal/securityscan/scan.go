@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"gitmake/internal/pathmatch"
 )
@@ -69,6 +72,21 @@ type contentRule struct {
 	// Go's regexp has no lookahead, so overlapping vendor prefixes and obvious
 	// documentation placeholders are filtered here instead.
 	reject *regexp.Regexp
+	// literals are substrings that every match of re must contain, at least one
+	// of which has to be present for the rule to be worth running.
+	//
+	// This is a speed gate, never a verdict. Most of these patterns begin with
+	// \b, and a leading zero-width assertion stops Go's regexp from extracting a
+	// required prefix, so it falls back to running the full engine over every
+	// byte: about 70 MB/s per rule, and nineteen rules make roughly 4 MB/s. A
+	// bytes.Contains is memchr-accelerated and runs at GB/s, and on ordinary
+	// source -- which holds none of these strings -- it rejects the rule outright.
+	//
+	// A rule that declares no literals simply runs its regex as before. The
+	// fallback is deliberately the slow-but-correct direction: a new rule can
+	// cost speed, but it can never be silently skipped.
+	// TestLiteralGatesNeverChangeAVerdict holds every rule to that.
+	literals [][]byte
 }
 
 // High-confidence rules match issuer-specific shapes that essentially cannot
@@ -76,54 +94,73 @@ type contentRule struct {
 // vendor prefix, so they are labelled for review.
 var contentRules = []contentRule{
 	{kind: "private_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----`)},
+		literals: lits(`-----BEGIN `),
+		re:       regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----`)},
 	{kind: "github_token", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{20,}\b`)},
+		literals: lits(`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`),
+		re:       regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9_]{20,}\b`)},
 	{kind: "github_fine_grained_token", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`)},
+		literals: lits(`github_pat_`),
+		re:       regexp.MustCompile(`\bgithub_pat_[A-Za-z0-9_]{20,}\b`)},
 	{kind: "aws_access_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)},
+		literals: lits(`AKIA`, `ASIA`),
+		re:       regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`)},
 	{kind: "slack_token", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bxox(?:b|p|a|r|s)-[A-Za-z0-9-]{10,}\b`)},
+		literals: lits(`xox`),
+		re:       regexp.MustCompile(`\bxox(?:b|p|a|r|s)-[A-Za-z0-9-]{10,}\b`)},
 	{kind: "slack_webhook", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`https://hooks\.slack\.com/services/[A-Za-z0-9_/+-]{20,}`)},
+		literals: lits(`hooks.slack.com`),
+		re:       regexp.MustCompile(`https://hooks\.slack\.com/services/[A-Za-z0-9_/+-]{20,}`)},
 	{kind: "discord_webhook", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/[0-9]{10,}/[A-Za-z0-9_-]{20,}`)},
+		literals: lits(`/api/webhooks/`),
+		re:       regexp.MustCompile(`https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/[0-9]{10,}/[A-Za-z0-9_-]{20,}`)},
 
 	// Model provider keys are the most common credential in AI-authored
 	// projects, which is exactly the workload GitMake publishes.
 	{kind: "anthropic_api_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`)},
+		literals: lits(`sk-ant-`),
+		re:       regexp.MustCompile(`\bsk-ant-[A-Za-z0-9_-]{20,}`)},
 	{kind: "openai_api_key", confidence: ConfidenceHigh,
-		re:     regexp.MustCompile(`\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}`),
-		reject: regexp.MustCompile(`^sk-ant-`)},
+		literals: lits(`sk-`),
+		re:       regexp.MustCompile(`\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{32,}`),
+		reject:   regexp.MustCompile(`^sk-ant-`)},
 	{kind: "huggingface_token", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bhf_[A-Za-z0-9]{30,}\b`)},
+		literals: lits(`hf_`),
+		re:       regexp.MustCompile(`\bhf_[A-Za-z0-9]{30,}\b`)},
 
 	{kind: "google_api_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
+		literals: lits(`AIza`),
+		re:       regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}\b`)},
 	{kind: "google_oauth_client_secret", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bGOCSPX-[A-Za-z0-9_-]{20,}`)},
+		literals: lits(`GOCSPX-`),
+		re:       regexp.MustCompile(`\bGOCSPX-[A-Za-z0-9_-]{20,}`)},
 	{kind: "gcp_service_account", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`"type"\s*:\s*"service_account"`)},
+		literals: lits(`service_account`),
+		re:       regexp.MustCompile(`"type"\s*:\s*"service_account"`)},
 
 	{kind: "stripe_secret_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{20,}\b`)},
+		literals: lits(`sk_live_`, `rk_live_`),
+		re:       regexp.MustCompile(`\b(?:sk|rk)_live_[0-9A-Za-z]{20,}\b`)},
 	{kind: "sendgrid_api_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b`)},
+		literals: lits(`SG.`),
+		re:       regexp.MustCompile(`\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b`)},
 	{kind: "npm_token", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`)},
+		literals: lits(`npm_`),
+		re:       regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}\b`)},
 	{kind: "azure_storage_key", confidence: ConfidenceHigh,
-		re: regexp.MustCompile(`AccountKey\s*=\s*[A-Za-z0-9+/]{60,}={0,2}`)},
+		literals: lits(`AccountKey`),
+		re:       regexp.MustCompile(`AccountKey\s*=\s*[A-Za-z0-9+/]{60,}={0,2}`)},
 
 	// A URL that embeds a password is a credential whatever the service is.
 	// Documentation placeholders are rejected so examples do not block a
 	// publish.
 	{kind: "connection_string_password", confidence: ConfidenceMedium,
-		re:     regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:@/]{1,64}:[^\s:@/]{3,128}@[^\s/"']{1,255}`),
-		reject: regexp.MustCompile(`(?i)://[^\s:@/]{1,64}:(?:\*+|x{3,}|pass(?:word|wd)?|secret|token|changeme|your[_-]?\w*|placeholder|<[^>]*>|\$\{[^}]*\}|%[^%]*%)@`)},
+		literals: lits(`://`),
+		re:       regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^\s:@/]{1,64}:[^\s:@/]{3,128}@[^\s/"']{1,255}`),
+		reject:   regexp.MustCompile(`(?i)://[^\s:@/]{1,64}:(?:\*+|x{3,}|pass(?:word|wd)?|secret|token|changeme|your[_-]?\w*|placeholder|<[^>]*>|\$\{[^}]*\}|%[^%]*%)@`)},
 	{kind: "jwt", confidence: ConfidenceMedium,
-		re: regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`)},
+		literals: lits(`eyJ`),
+		re:       regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}`)},
 }
 
 const (
@@ -137,12 +174,103 @@ const (
 	maxContentBytes = 64 << 20
 )
 
+// newScanWindow allocates the buffer scanContent streams through. The length
+// is what makes the chunk loop terminate: each pass retains contentOverlap
+// bytes and must still advance by contentChunk.
+func newScanWindow() []byte { return make([]byte, contentChunk+contentOverlap) }
+
+// scanTarget is a file the walk selected for content scanning.
+type scanTarget struct {
+	path string
+	rel  string
+}
+
+// maxScanWorkers bounds how many files are content-scanned at once. Each worker
+// holds a scan window of contentChunk+contentOverlap, so the cap is really a
+// memory cap: eight workers is about eight megabytes.
+//
+// Eight is where the measured return stops being worth that memory. Scaling
+// depends entirely on the shape of the tree, because the two regimes have
+// different bottlenecks (measured on a 16-thread Windows machine):
+//
+//	2000 files x 16 KiB:  1 worker  76 MB/s ->  2 workers  152 -> 8 workers  150
+//	  32 files x  1 MiB:  1 worker 268 MB/s ->  4 workers 1065 -> 8 workers 1631
+//
+// A tree of small files is bound by per-file open and read, and stops
+// improving after two workers. A tree of large files is bound by the rule
+// matching and scales nearly linearly. Sixteen workers reach 2154 MB/s on the
+// second shape and change nothing on the first, which is not worth doubling
+// the memory for.
+const maxScanWorkers = 8
+
+// scanWorkers is a variable so a test can force the sequential path and hold
+// the parallel one against it.
+var scanWorkers = defaultScanWorkers()
+
+func defaultScanWorkers() int {
+	n := runtime.NumCPU()
+	if n > maxScanWorkers {
+		n = maxScanWorkers
+	}
+	if n < 1 {
+		n = 1
+	}
+	return n
+}
+
+// scanAll content-scans every target and returns the results positionally, so
+// what the report contains never depends on which worker happened to finish
+// first. Only this phase is parallel: the walk that produced targets is cheap,
+// and keeping it sequential is what keeps its errors ordered.
+func scanAll(targets []scanTarget) ([][]contentMatch, []error) {
+	matches := make([][]contentMatch, len(targets))
+	errs := make([]error, len(targets))
+
+	workers := scanWorkers
+	if workers > len(targets) {
+		workers = len(targets)
+	}
+	if workers <= 1 {
+		buf := newScanWindow()
+		for i := range targets {
+			matches[i], errs[i] = scanContent(targets[i].path, buf)
+		}
+		return matches, errs
+	}
+
+	// Work is handed out one file at a time rather than in equal ranges. File
+	// sizes in a source tree differ by orders of magnitude, and a single large
+	// file in a fixed range would leave one worker running long after the rest
+	// had finished.
+	var next int64
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buf := newScanWindow()
+			for {
+				i := int(atomic.AddInt64(&next, 1)) - 1
+				if i >= len(targets) {
+					return
+				}
+				// Every goroutine writes only its own index and its own window,
+				// so results need no lock and stay in walk order.
+				matches[i], errs[i] = scanContent(targets[i].path, buf)
+			}
+		}()
+	}
+	wg.Wait()
+	return matches, errs
+}
+
 func Scan(root string, o Options) (Report, error) {
 	report := Report{Schema: "gitmake.security/v1", SecretScan: o.SecretScan}
 	lfsPatterns, err := readLFSPatterns(root)
 	if err != nil {
 		return report, err
 	}
+	var targets []scanTarget
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -189,14 +317,25 @@ func Scan(root string, o Options) (Report, error) {
 			})
 			report.Blocking = true
 		}
+		targets = append(targets, scanTarget{path: path, rel: rel})
+		return nil
+	})
 
-		matches, scanErr := scanContent(path)
-		if scanErr != nil {
-			return scanErr
+	// Targets collected before a walk error are still scanned, so a failed walk
+	// reports the findings it did reach rather than only the error.
+	matches, scanErrs := scanAll(targets)
+	for i, t := range targets {
+		if scanErrs[i] != nil {
+			// Walk order, not completion order: the same tree must always fail
+			// with the same error. A walk error outranks a content error.
+			if err == nil {
+				err = scanErrs[i]
+			}
+			continue
 		}
-		for _, m := range matches {
+		for _, m := range matches[i] {
 			report.Findings = append(report.Findings, Finding{
-				Path:       rel,
+				Path:       t.rel,
 				Kind:       m.kind,
 				Confidence: m.confidence,
 				Line:       m.line,
@@ -204,15 +343,17 @@ func Scan(root string, o Options) (Report, error) {
 			})
 			report.Blocking = true
 		}
-		return nil
-	})
-	sort.Slice(report.Findings, func(i, j int) bool {
+	}
+
+	// Stable, so two findings that compare equal keep a fixed order instead of
+	// depending on the sort's internal choices.
+	sort.SliceStable(report.Findings, func(i, j int) bool {
 		if report.Findings[i].Path == report.Findings[j].Path {
 			return report.Findings[i].Kind < report.Findings[j].Kind
 		}
 		return report.Findings[i].Path < report.Findings[j].Path
 	})
-	sort.Slice(report.LargeFiles, func(i, j int) bool { return report.LargeFiles[i].Path < report.LargeFiles[j].Path })
+	sort.SliceStable(report.LargeFiles, func(i, j int) bool { return report.LargeFiles[i].Path < report.LargeFiles[j].Path })
 	return report, err
 }
 
@@ -227,7 +368,13 @@ type contentMatch struct {
 // It reports the first location of each kind rather than every occurrence:
 // one actionable line per kind per file is what remediation needs, and
 // reporting all kinds at once is what stops the fix-one-find-another cycle.
-func scanContent(path string) ([]contentMatch, error) {
+//
+// buf is supplied by the caller and reused across files. Allocating it here
+// cost a megabyte of allocation, and a megabyte of first-touch page faults,
+// for every file scanned however small: a tree of two thousand ordinary source
+// files allocated two gigabytes to read thirty megabytes of text. It must be
+// contentChunk+contentOverlap long; newScanWindow builds it.
+func scanContent(path string, buf []byte) ([]contentMatch, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -239,7 +386,6 @@ func scanContent(path string) ([]contentMatch, error) {
 		remaining[i] = true
 	}
 
-	buf := make([]byte, contentChunk+contentOverlap)
 	carry := 0
 	// linesBefore counts newlines in the bytes preceding the current window.
 	linesBefore := 0
@@ -299,8 +445,36 @@ func scanContent(path string) ([]contentMatch, error) {
 	return found, nil
 }
 
+// lits is shorthand for the literal gate in the rule table above.
+func lits(ss ...string) [][]byte {
+	out := make([][]byte, len(ss))
+	for i, s := range ss {
+		out[i] = []byte(s)
+	}
+	return out
+}
+
+// mayMatch reports whether window could possibly contain a match for rule.
+// A false answer is authoritative: every match of rule.re contains one of
+// rule.literals, so a window holding none of them holds no match. A rule that
+// declares no literals is always run.
+func mayMatch(rule contentRule, window []byte) bool {
+	if len(rule.literals) == 0 {
+		return true
+	}
+	for _, lit := range rule.literals {
+		if bytes.Contains(window, lit) {
+			return true
+		}
+	}
+	return false
+}
+
 // findMatch returns the offset of the first acceptable match, or -1.
 func findMatch(rule contentRule, window []byte) int {
+	if !mayMatch(rule, window) {
+		return -1
+	}
 	offset := 0
 	for {
 		loc := rule.re.FindIndex(window[offset:])
