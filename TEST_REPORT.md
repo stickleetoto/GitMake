@@ -1,4 +1,4 @@
-# GitMake v1.2.8 Test Report
+# GitMake v1.2.9 Test Report
 
 Verified on Windows 11 x64 locally, and on Linux, Windows and macOS in CI.
 
@@ -11,55 +11,82 @@ Verified on Windows 11 x64 locally, and on Linux, Windows and macOS in CI.
 | `go test ./...` | PASS |
 | `go test ./...` a second time | PASS (the suite is repeatable) |
 | `go test -race ./...` | PASS on Linux and macOS in CI |
-| Windows E2E: v05, v051, v052, v121, v123, v124, v126 | PASS |
+| Windows E2E: v05, v051, v052, v121, v123, v124, v126 | PASS locally and in CI |
 | Linux E2E: all remaining suites | PASS |
 | `package` job: build, verify manifest, rebuild from the source ZIP | PASS |
 
-Every extraction step in this release was verified against the full suite and
-the E2E gates before the next one began.
+CI on the release commit: 8 of 8 green.
 
 ## Coverage
 
-| Package | v1.2.7 | v1.2.8 |
+| Package | v1.2.8 | v1.2.9 |
 | --- | --- | --- |
-| `internal/app` | 26.2% | 41.9% |
-| `internal/github` | 69.3% | 69.3% |
+| `internal/securityscan` | 83.1% | 87.3% |
+| `internal/app` | 41.9% | 41.9% |
 | `internal/planstore` | 82.6% | 82.6% |
-| `internal/securityscan` | 83.1% | 83.1% |
+| `internal/discovery` | 81.8% | 81.8% |
+| `internal/github` | 69.3% | 69.3% |
 | `internal/gmerr` | 100% | 100% |
 
 ## What is proven that was not before
 
-The confirmation rules `STABILITY.md` promises now have tests: the full
-risk table, that `--yes` cannot answer for a person above low risk even at a
-terminal, and that a destructive phrase minted for one plan cannot confirm
-another.
+The secret scan was made roughly a hundred times faster. Everything below
+exists so that speed cannot have cost detection, which is the failure this
+change could plausibly have introduced and which no existing test would have
+caught: a literal gate that is too narrow stops finding a credential without
+failing, and a parallel scan can make findings depend on which worker finished
+first.
 
-The publish pipeline is driven end to end against a stubbed GitHub CLI with a
-bare repository on disk, so results are inspected rather than inferred:
+- Every content rule returns the identical offset gated and ungated, over
+  samples covering every branch of every alternation: all five GitHub token
+  prefixes, both AWS prefixes, all five Slack ones, both Stripe ones, every
+  `-----BEGIN` variant, Discord's canary and ptb hosts, and OpenAI's three
+  account prefixes.
+- Those samples are proven to be real positives first, so the agreement above
+  cannot be satisfied by inputs that match nothing.
+- Every rule declares a literal gate, and every rule has a sample. A rule added
+  later without either is a test failure, not a silent regression.
+- A rule that declares no literals runs its regex unchanged, so the fallback
+  costs speed rather than detection.
+- The parallel scan equals the sequential scan of the same tree at 2, 3, 4, 8
+  and 16 workers, twenty runs each, over nineteen kinds of secret in sixty
+  files — two kinds in one file, secrets three thousand lines deep, binary
+  files, a secret-by-name `.env`, and a large file. Reports must be deeply
+  equal, order included.
+- The same tree scanned repeatedly at the default worker count gives the
+  identical report every time.
+- An unreadable file produces the same error on every run, so the gate cannot
+  sometimes pass and sometimes fail.
 
-- a repository is created with the expected files and one commit
-- a second publish reports UPDATE with exactly one modification
-- republishing an unchanged source adds no commit
-- a dry run creates nothing
-- a configured release is created with its assets; a duplicate tag is refused
-- a bound folder published elsewhere stops with PROJECT_IDENTITY_MISMATCH
-- managed sync leaves remote-only files alone, and removes only what GitMake published
-- a mass deletion is classified destructive and blocked before any mutation
-- an ordinary five-file cleanup is not
-- an update reports a visibility mismatch and never changes the remote
-- a detected secret blocks the publish while its findings survive for the user
+The equivalence test was verified to fail rather than assumed to work.
+Collecting results in completion order — the classic form of this bug — makes
+the scanner attribute secrets to the wrong files, and the test catches it on
+the first run.
 
-## Retired
+The whole scanner was also compared against v1.2.8 end to end. A 125-file
+fixture covering all nineteen rules, binary files, `.env`, a documentation
+placeholder that must not block, a large file, an empty file and an empty
+directory produced 97 findings on both versions and byte-identical report JSON.
 
-`e2e_v03`, `e2e_v07`, `e2e_v072` and `e2e_v073` are removed. Each ended in the
-pre-v1.0 approval flow that printed a copyable token, which v1.0 removed, so
-none could run. Everything they asserted that GitMake still does is listed
-above; the rest was already covered in `internal/github`, `internal/discovery`,
-`internal/securityscan` and `mcp_test`.
+## Benchmarks
+
+Committed as `BenchmarkScanTree` and `BenchmarkScanContentOneFile`, so a later
+change to the rule table cannot quietly make the publish floor worse. Trees are
+warmed before timing: on Windows the first read of a freshly written file also
+pays for the virus scanner, which would otherwise swamp the measurement.
+
+| tree | v1.2.8 | v1.2.9 |
+| --- | --- | --- |
+| 100 files × 4 KiB | 118.7 ms | 3.4 ms |
+| 500 files × 16 KiB | 3,958 ms | 14.2 ms |
+| 2000 files × 16 KiB | 17,271 ms | 175 ms |
+
+Allocation on the last: 2.17 GB to 11.5 MB.
 
 ## Not verified here
 
+- The race detector on the development machine, which has no C compiler. The
+  CI race jobs on Linux and macOS cover it, and both pass.
 - Linux and macOS self-upgrade against a real GitHub release. The replacement
   is platform-neutral Go and is unit-tested, and the platform asset mapping is
   tested against the published release names, but no such machine was used.
